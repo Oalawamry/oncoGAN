@@ -7,7 +7,7 @@ from torch.optim import Adam
 from torch.nn import functional as F
 from torch.nn import (Dropout, LeakyReLU, Linear, Module, ReLU, Sequential,
 Conv2d, ConvTranspose2d, Sigmoid, init, BCELoss, CrossEntropyLoss,SmoothL1Loss,LayerNorm)
-from model.synthesizer.transformer import ImageTransformer,DataTransformer
+from ctabgan.synthesizer.transformer import ImageTransformer,DataTransformer
 from tqdm import tqdm
 
 
