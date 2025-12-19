@@ -1,172 +1,38 @@
 #!/usr/local/bin/python3
 
 import sys
-sys.path.append('/oncoGAN/')
+sys.path.append('/oncoGAN/models')
+sys.path.append('/oncoGAN/models/caloforest')
 
 import os
 import re
 import copy
 import click
 import pickle
+import itertools
+import subprocess
+from multiprocessing import Pool
 import torch
 import random
 import pandas as pd
 import numpy as np
-import multiprocessing
 import matplotlib.pyplot as plt
 import seaborn as sns
+from typing import Literal, List, Tuple, Optional
 from datetime import date
 from liftover import ChainFile
 from tqdm import tqdm
 from pyfaidx import Fasta
+from Bio.Seq import Seq
 import pyranges as pr
 
-VERSION = "0.2.1"
+VERSION = "1.0.0"
 
-sig2tum:dict = {
-    "DNP": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Kidney-RCC","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "TNP": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Kidney-RCC","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "INS": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Kidney-RCC","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "DEL": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Kidney-RCC","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "SBS1": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Kidney-RCC","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "SBS10c": ["Eso-AdenoCa"],
-    "SBS12": ["Liver-HCC"],
-    "SBS13": ["Breast-AdenoCa","Eso-AdenoCa","Panc-Endocrine"],
-    "SBS16": ["Liver-HCC"],
-    "SBS17a": ["Eso-AdenoCa"],
-    "SBS17b": ["Eso-AdenoCa"],
-    "SBS18": ["Breast-AdenoCa","Eso-AdenoCa"],
-    "SBS19": ["CNS-PiloAstro","Panc-Endocrine"],
-    "SBS2": ["Breast-AdenoCa","Eso-AdenoCa","Panc-Endocrine"],
-    "SBS22": ["Kidney-RCC"],
-    "SBS23": ["CNS-PiloAstro"],
-    "SBS28": ["Eso-AdenoCa"],
-    "SBS3": ["Breast-AdenoCa"],
-    "SBS30": ["Panc-Endocrine"],
-    "SBS35": ["Liver-HCC"],
-    "SBS36": ["Panc-Endocrine"],
-    "SBS37": ["Prost-AdenoCA"],
-    "SBS4": ["Liver-HCC"],
-    "SBS40": ["Kidney-RCC","Liver-HCC","Prost-AdenoCA"],
-    "SBS5": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Kidney-RCC","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "SBS8": ["Breast-AdenoCa","CNS-PiloAstro","Eso-AdenoCa","Liver-HCC","Lymph-CLL","Panc-Endocrine","Prost-AdenoCA"],
-    "SBS9": ["Lymph-CLL"]
-}
+default_tumors:list = ["Biliary-AdenoCA","Bladder-TCC","Bone-Leiomyo","Bone-Osteosarc","Breast-AdenoCa","Cervix-SCC","CNS-GBM","CNS-Medullo","CNS-Oligo","CNS-PiloAstro","ColoRect-AdenoCA","Eso-AdenoCa","Head-SCC","Kidney-ChRCC","Kidney-RCC","Liver-HCC","Lung-AdenoCA","Lung-SCC","Lymph-BNHL","Lymph-CLL","Myeloid-MPN","Ovary-AdenoCA","Panc-AdenoCA","Panc-Endocrine","Prost-AdenoCA","Skin-Melanoma","Stomach-AdenoCA","Thy-AdenoCA","Uterus-AdenoCA"]
 
-def tumor_models(tumor, device, counts_only=False, drivers_only=False, no_drivers=False) -> list:
-
-    """
-    Get the specific models for the selected tumor type
-    """
-
-    # Drivers model and files
-    if tumor == "Lymph-CLL":
-        driversModel:dict = {}
-        driversModel['MUT']:dict = {}
-        driversModel['MUT']['model'] = torch.load(f"/oncoGAN/trained_models/drivers/Lymph-MCLL_drivers.pkl", map_location=device)
-        driversModel['MUT']['mutations'] = pd.read_csv(f"/oncoGAN/trained_models/drivers/Lymph-MCLL_driver_mutations.csv")
-        driversModel['UNMUT']:dict = {}
-        driversModel['UNMUT']['model']:dict = {}
-        driversModel['UNMUT']['model']['x1'] = torch.load(f"/oncoGAN/trained_models/drivers/Lymph-UCLL1_drivers.pkl", map_location=device)
-        driversModel['UNMUT']['model']['x2'] = torch.load(f"/oncoGAN/trained_models/drivers/Lymph-UCLL2_drivers.pkl", map_location=device)
-        driversModel['UNMUT']['model']['x3'] = torch.load(f"/oncoGAN/trained_models/drivers/Lymph-UCLL3_drivers.pkl", map_location=device)
-        driversModel['UNMUT']['mutations'] = pd.read_csv(f"/oncoGAN/trained_models/drivers/Lymph-UCLL_driver_mutations.csv")
-    elif tumor == "Panc-Endocrine":
-        driversModel:dict = {}
-        driversModel['model']:dict = {}
-        driversModel['model']['x1'] = torch.load(f"/oncoGAN/trained_models/drivers/Panc-Endocrine1_drivers.pkl", map_location=device)
-        driversModel['model']['x2'] = torch.load(f"/oncoGAN/trained_models/drivers/Panc-Endocrine2_drivers.pkl", map_location=device)
-        driversModel['mutations'] = pd.read_csv(f"/oncoGAN/trained_models/drivers/{tumor}_driver_mutations.csv")
-    else:
-        driversModel:dict = {}
-        driversModel['model'] = torch.load(f"/oncoGAN/trained_models/drivers/{tumor}_drivers.pkl", map_location=device)
-        driversModel['mutations'] = pd.read_csv(f"/oncoGAN/trained_models/drivers/{tumor}_driver_mutations.csv")
-    
-    if drivers_only:
-        return(driversModel)
-
-    # Counts model
-    if tumor == "Breast-AdenoCa":
-        countModel:dict = {}
-        countModel['x1'] = torch.load(f"/oncoGAN/trained_models/counts/Breast-AdenoCa1_counts.pkl", map_location=device)
-        countModel['x2'] = torch.load(f"/oncoGAN/trained_models/counts/Breast-AdenoCa2_counts.pkl", map_location=device)
-    elif tumor == "CNS-PiloAstro":
-        countModel:dict = {}
-        countModel['x1'] = torch.load(f"/oncoGAN/trained_models/counts/CNS-PiloAstro1_counts.pkl", map_location=device)
-        countModel['x2'] = torch.load(f"/oncoGAN/trained_models/counts/CNS-PiloAstro2_counts.pkl", map_location=device)
-    elif tumor == "Eso-AdenoCa":
-        countModel:dict = {}
-        countModel['x1'] = torch.load(f"/oncoGAN/trained_models/counts/Eso-AdenoCa1_counts.pkl", map_location=device)
-        countModel['x2'] = torch.load(f"/oncoGAN/trained_models/counts/Eso-AdenoCa2_counts.pkl", map_location=device)
-        countModel['x3'] = torch.load(f"/oncoGAN/trained_models/counts/Eso-AdenoCa3_counts.pkl", map_location=device)
-    elif tumor == "Kidney-RCC":
-        countModel = torch.load(f"/oncoGAN/trained_models/counts/Kidney-RCC_counts.pkl", map_location=device)
-    elif tumor == "Liver-HCC":
-        countModel:dict = {}
-        countModel['x1'] = torch.load(f"/oncoGAN/trained_models/counts/Liver-HCC1_counts.pkl", map_location=device)
-        countModel['x2'] = torch.load(f"/oncoGAN/trained_models/counts/Liver-HCC2_counts.pkl", map_location=device)
-    elif tumor == "Lymph-CLL":
-        countModel:dict = {}
-        countModel['MUT']:dict = {}
-        countModel['MUT']['x1'] = torch.load(f"/oncoGAN/trained_models/counts/Lymph-MCLL1_counts.pkl", map_location=device)
-        countModel['MUT']['x2'] = torch.load(f"/oncoGAN/trained_models/counts/Lymph-MCLL2_counts.pkl", map_location=device)
-        countModel['UNMUT']:dict = {}
-        countModel['UNMUT']['x1'] = torch.load(f"/oncoGAN/trained_models/counts/Lymph-UCLL1_counts.pkl", map_location=device)
-        countModel['UNMUT']['x2'] = torch.load(f"/oncoGAN/trained_models/counts/Lymph-UCLL2_counts.pkl", map_location=device)
-    elif tumor == 'Panc-Endocrine':
-        countModel:dict = {}
-        countModel['x1'] = torch.load(f"/oncoGAN/trained_models/counts/Panc-Endocrine1_counts.pkl", map_location=device)
-        countModel['x2'] = torch.load(f"/oncoGAN/trained_models/counts/Panc-Endocrine2_counts.pkl", map_location=device)
-    elif tumor == "Prost-AdenoCA":
-        countModel = torch.load(f"/oncoGAN/trained_models/counts/Prost-AdenoCA_counts.pkl", map_location=device)
-
-    # Counts corrections
-    countsCorr:pd.DataFrame = pd.read_csv(f"/oncoGAN/trained_models/counts/counts_correction_rates.csv")
-
-    # Counts exclusions
-    countsEx:pd.DataFrame = pd.read_csv(f"/oncoGAN/trained_models/counts/counts_exclusions.csv")
-
-    if counts_only:
-        return(countModel, countsCorr, countsEx)
-    
-    # Mutations model
-    if tumor == "Lymph-CLL":
-        mutModel:dict = {}
-        mutModel['MUT'] = torch.load(f"/oncoGAN/trained_models/mutations/Lymph-CLL_mutations.pkl", map_location=device)
-        mutModel['UNMUT'] = torch.load(f"/oncoGAN/trained_models/mutations/Lymph-CLL_mutations.pkl", map_location=device)
-    else:
-        mutModel = torch.load(f"/oncoGAN/trained_models/mutations/{tumor}_mutations.pkl", map_location=device)
-
-    # Positions model
-    if tumor == "Lymph-CLL":
-        posModel:dict = {}
-        with open(f"/oncoGAN/trained_models/positions/Lymph-MCLL_positions.pkl", 'rb') as f:
-           posModel['MUT'] = pickle.load(f)
-        with open(f"/oncoGAN/trained_models/positions/Lymph-UCLL_positions.pkl", 'rb') as f:
-           posModel['UNMUT'] = pickle.load(f)
-    else:
-        with open(f"/oncoGAN/trained_models/positions/{tumor}_positions.pkl", 'rb') as f:
-           posModel = pickle.load(f)
-
-    if no_drivers:
-        return(countModel, mutModel, posModel, countsCorr, countsEx)
-    else:
-        return(countModel, mutModel, posModel, driversModel, countsCorr, countsEx)
-
-def cna_sv_models(device) -> list:
-
-    """
-    Get the CNA and SV models
-    """
-    
-    cna_sv_countModel = torch.load("/oncoGAN/trained_models/cna_sv/CNA_SV_counts.pkl", map_location=device)
-    cnaModel = torch.load("/oncoGAN/trained_models/cna_sv/CNA_model.pkl", map_location=device)
-    svModel:dict = {}
-    with open("/oncoGAN/trained_models/cna_sv/SV_positions.pkl", 'rb') as f:
-        svModel['pos'] = pickle.load(f)
-    svModel['sv'] = torch.load("/oncoGAN/trained_models/cna_sv/SV_model.pkl", map_location=device)
-
-    return(cna_sv_countModel, cnaModel, svModel)
+#################
+# Miscellaneous #
+#################
 
 def out_path(outDir, tumor, prefix=None, n=0, custom=False) -> click.Path:
 
@@ -183,1298 +49,6 @@ def out_path(outDir, tumor, prefix=None, n=0, custom=False) -> click.Path:
     
     return(output)
 
-def preprocess_counts(counts, tumor, corrections, exclusions) -> pd.DataFrame:
-    
-    """
-    Function to preprocess the counts
-    """
-
-    # Select corrections and exclusions tumor rows
-    corrections = corrections.loc[corrections["tumor"]==tumor]
-    corrections = corrections.drop('tumor', axis=1).reset_index(drop=True)
-    exclusions = exclusions.loc[exclusions["tumor"]==tumor]
-    exclusions = exclusions.drop('tumor', axis=1).reset_index(drop=True)
-
-    # Assign a donor index
-    counts = counts.astype(float)
-    counts['donor'] = [i for i in range(counts.shape[0])]
-    
-    # Pivot longer counts
-    counts = counts.melt(id_vars=['donor'],var_name="mutations", value_name="count")
-
-    # Left aligned counts and countsCorr
-    counts = counts.merge(corrections, on='mutations', how='left')
-
-    # Calculate total number of mutations per simulateed donor
-    counts = counts.groupby('donor', group_keys=False).apply(lambda x: (x.assign(total=x['count'].sum(),
-                                                                                 count_perc=x['count']/x['count'].sum()*100)))
-
-    # Filter the counts
-    counts = counts.groupby('donor', group_keys=False).apply(lambda x: (x.assign(filter_count_perc=np.where((x['count_perc'] < x['clean']),
-                                                                                                            0,
-                                                                                                            x['count_perc']))))
-    counts = counts.groupby('donor', group_keys=False).apply(lambda x: (x.assign(filter_count_perc=np.where((x['filter_count_perc'] > x['max']) | ((x['filter_count_perc'] < x['min']) & ((x['filter_count_perc'] != 0))),
-                                                                                                            np.nan,
-                                                                                                            x['filter_count_perc']))))
-
-    # Assign removed mutations
-    counts = counts.groupby('donor', group_keys=False).apply(lambda x: (x.assign(removed=100-x['filter_count_perc'].sum())))
-    counts = counts.groupby('donor', group_keys=False).apply(lambda x: (x.assign(updated_count_perc=x['filter_count_perc']+(x['filter_count_perc']/x['filter_count_perc'].sum()*x['removed']))))
-    counts = counts.groupby('donor', group_keys=False).apply(lambda x: (x.assign(count=(x['updated_count_perc']*x['total']/100).round())))
-
-    # Return the table to the original format
-    counts = counts.drop(columns=['clean', 'max', 'min', 'total', 'count_perc', 'filter_count_perc', 'removed', 'updated_count_perc'])
-    counts = counts.pivot(index='donor', columns='mutations', values='count').reset_index(drop=True).rename_axis(None, axis=1)
-    counts = counts.dropna(axis=0, how='any').round(0).astype(int).reset_index(drop=True)
-    
-    # Check that there is a column for each mutation and if not initialize it
-    counts = counts.assign(**{col:0 for col in ["DNP", "TNP", "INS", "DEL"] if col not in counts.columns})
-    
-    if exclusions.shape[0] > 0:
-        for _, row in exclusions.iterrows():
-            signatureA:str = row['signatureA']
-            signatureB:str = row['signatureB']
-            
-            # Get the index to remove
-            index_rm:pd.Index = counts[(counts[signatureA] > 0) & (counts[signatureB] > 0)].index
-            
-            # Remove the columns
-            counts = counts.drop(index_rm).reset_index(drop=True)
-    else:
-        pass
-
-    return(counts)
-
-def simulate_counts(tumor, countSynthesizer, nCases, corrections, exclusions) -> pd.DataFrame:
-
-    """
-    Function to generate the number of each type of mutation per case
-    """
-
-    if tumor == "Breast-AdenoCa":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] < nCases:
-            # Model 1
-            x1_counts:pd.DataFrame = pd.DataFrame()
-            while x1_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x1'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x1_counts = pd.concat([x1_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x1_counts['total'] = x1_counts.sum(axis=1)
-            x1_counts['keep'] = x1_counts.apply(lambda x: 
-                                                np.where(x['SBS5'] / x['total'] < 0.5,
-                                                        np.random.choice([True, False], p=[0.3, 0.7]),
-                                                        True),
-                                                axis=1)
-            x1_counts['keep2'] = x1_counts.apply(lambda x: 
-                                                np.where((x['SBS18'] / x['total'] > 0.05) & (x['SBS18'] / x['total'] < 0.1),
-                                                        np.random.choice([True, False], p=[0.2, 0.8]),
-                                                        True),
-                                                axis=1)
-            x1_counts['keep'] = x1_counts.apply(lambda x: 
-                                                np.where(x['keep'] & x['keep2'],
-                                                        True,
-                                                        False),
-                                                axis=1)
-            x1_counts = x1_counts.loc[x1_counts["keep"]==True]
-            x1_counts = x1_counts.drop(['keep', 'keep2', 'total'], axis=1).reset_index(drop=True)
-
-            # Model 2
-            x2_counts:pd.DataFrame = pd.DataFrame()
-            while x2_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x2'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x2_counts = pd.concat([x2_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x2_counts['total'] = x2_counts.sum(axis=1)
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                np.where(x['SBS1'] / x['total'] < 0.1,
-                                                        np.random.choice([True, False], p=[0.3, 0.7]),
-                                                        True),
-                                                axis=1)
-            x2_counts['keep2'] = x2_counts.apply(lambda x: 
-                                                np.where((x['SBS18'] / x['total'] > 0.05) & (x['SBS18'] / x['total'] < 0.1),
-                                                        np.random.choice([True, False], p=[0.2, 0.8]),
-                                                        True),
-                                                axis=1)
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                np.where(x['keep'] & x['keep2'],
-                                                        True,
-                                                        False),
-                                                axis=1)
-            x2_counts = x2_counts.loc[x2_counts["keep"]==True]
-            x2_counts = x2_counts.drop(['keep', 'keep2', 'total'], axis=1).reset_index(drop=True)
-            
-            # Merge
-            counts:pd.DataFrame = pd.concat([counts, x1_counts, x2_counts], ignore_index=True)
-            ## General filters
-            counts['total'] = counts.sum(axis=1)
-            counts['modify'] = np.random.choice([True, False], size=counts.shape[0], p=[0.7, 0.3])
-            counts['SBS2'] = np.where(counts['modify'], counts['SBS2'], 0)
-            counts['SBS13'] = np.where(counts['modify'], counts['SBS13'], 0)
-            counts['SBS1'] = counts.apply(lambda x: 
-                                          np.where((x['SBS1'] > 300) & (x['SBS1'] < 450),
-                                                   np.random.choice([x['SBS1']*np.random.choice([x/100 for x in range(60, 101, 5)]), x['SBS1']], p=[0.7, 0.3]),
-                                                   x['SBS1']),
-                                                axis=1)
-            counts['SBS2'] = counts.apply(lambda x: 
-                                          np.where((x['SBS2']/x['total'] > 0.12) & (x['SBS2']/x['total'] < 0.2),
-                                                   np.random.choice([x['SBS2']*np.random.choice([x/100 for x in range(25, 40, 5)]), x['SBS2']], p=[0.8, 0.2]),
-                                                   x['SBS2']),
-                                                axis=1)
-            counts['keep'] = counts.apply(lambda x:
-                                          np.where(x['SBS8'] == 0,
-                                                   np.random.choice([True, False], p=[0.8, 0.2]),
-                                                   True),
-                                                axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts = counts.drop(columns=['modify', 'total', 'keep'])
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-        return(counts)
-    
-    elif tumor == "CNS-PiloAstro":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] < nCases:
-            # Model 1
-            x1_counts:pd.DataFrame = pd.DataFrame()
-            while x1_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x1'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x1_counts = pd.concat([x1_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x1_counts['total'] = x1_counts.sum(axis=1)
-            x1_counts['keep'] = x1_counts.apply(lambda x: 
-                                                    np.where(x['total'] > 500,
-                                                            np.where(~((x['SBS8'] != 0) | (x['SBS23'] != 0)),
-                                                                    np.random.choice([True, False], p=[0.7, 0.3]),
-                                                                    True),
-                                                            np.where((x['SBS8'] != 0) | (x['SBS19'] != 0) | (x['SBS23'] != 0),
-                                                                        True,
-                                                                        np.random.choice([True, False]))),
-                                axis=1)
-            x1_counts = x1_counts.loc[x1_counts["keep"]==True]
-            x1_counts = x1_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            # Model 2
-            x2_counts:pd.DataFrame = pd.DataFrame()
-            while x2_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x2'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x2_counts = pd.concat([x2_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x2_counts['total'] = x2_counts.sum(axis=1)
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                    np.where(x['total'] > 500,
-                                                            False,
-                                                            np.where((x['SBS8'] != 0) | (x['SBS19'] != 0) | (x['SBS23'] != 0),
-                                                                        False,
-                                                                        np.random.choice([True, False]))),
-                                axis=1)
-            x2_counts = x2_counts.loc[x2_counts["keep"]==True]
-            x2_counts = x2_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-        
-            # Merge
-            counts:pd.DataFrame = pd.concat([counts, x1_counts, x2_counts], ignore_index=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-        return(counts)
-    
-    elif tumor == "Eso-AdenoCa":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] < nCases:
-            # Model 1
-            x1_counts:pd.DataFrame = pd.DataFrame()
-            while x1_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x1'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x1_counts = pd.concat([x1_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x1_counts['total'] = x1_counts.sum(axis=1)
-            x1_counts['keep'] = x1_counts.apply(lambda x: 
-                                                np.where((x['SBS2'] == 0) & (x['SBS13'] == 0) & (x['SBS28'] == 0),
-                                                        True,
-                                                        False),
-                                                axis=1)
-            x1_counts = x1_counts.loc[x1_counts["keep"]==True]
-            x1_counts = x1_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            # Model 2
-            x2_counts:pd.DataFrame = pd.DataFrame()
-            while x2_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x2'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x2_counts = pd.concat([x2_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x2_counts['total'] = x2_counts.sum(axis=1)
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                np.where(x['SBS2'] != 0,
-                                                        True,
-                                                        False),
-                                                axis=1)
-            x2_counts = x2_counts.loc[x2_counts["keep"]==True]
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                np.where(x['SBS13'] != 0,
-                                                        np.random.choice([True, False]),
-                                                        False),
-                                                axis=1)
-            x2_counts = x2_counts.loc[x2_counts["keep"]==True]
-            x2_counts = x2_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            # Model 3
-            x3_counts:pd.DataFrame = pd.DataFrame()
-            while x3_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x3'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x3_counts = pd.concat([x3_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x3_counts['total'] = x3_counts.sum(axis=1)
-            x3_counts['keep'] = x3_counts.apply(lambda x: 
-                                                np.where(x['SBS28'] != 0,
-                                                        True,
-                                                        False),
-                                                axis=1)
-            x3_counts = x3_counts.loc[x3_counts["keep"]==True]
-            x3_counts = x3_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-            
-            # Merge
-            counts:pd.DataFrame = pd.concat([counts, x1_counts, x2_counts, x3_counts], ignore_index=True)
-            ## General filters
-            counts['total'] = counts.sum(axis=1)
-            counts['SBS17a'] = counts.apply(lambda x:
-                                            np.where((x['total'] < 30000) & (x['SBS17a']/x['total'] < 0.1),
-                                                    np.random.choice([x['SBS17a'], 0], p=[0.7, 0.3]),
-                                                    x['SBS17a']),
-                                            axis=1)
-            counts['SBS17b'] = counts.apply(lambda x:
-                                            np.where((x['total'] < 30000) & (x['SBS17b']/x['total'] < 0.2),
-                                                    np.random.choice([x['SBS17b'], 0], p=[0.7, 0.3]),
-                                                    x['SBS17b']),
-                                            axis=1)
-            counts['SBS28'] = counts.apply(lambda x:
-                                        np.where(x['SBS28']/x['total'] > 0.25,
-                                                    x['SBS28']/4,
-                                                    np.where(x['SBS28']/x['total'] > 0.15,
-                                                            x['SBS28']/2.5,
-                                                            x['SBS28'])),
-                                            axis=1)
-            counts['keep'] = counts.apply(lambda x:
-                                        np.where((x['SBS17a']/x['total'] > 0.15) & (x['SBS13'] != 0), 
-                                                False,
-                                                np.where((x['SBS17b']/x['total'] > 0.3) & (x['SBS13'] != 0),
-                                                            False,
-                                                            np.where((x['SBS17a'] != 0) & (x['SBS17b'] == 0), 
-                                                                    False,
-                                                                    True))),
-                                        axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts = counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-        return(counts)
-    
-    elif tumor == "Kidney-RCC":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] <= nCases:
-            tmp_counts:pd.DataFrame = pd.DataFrame()
-            for _ in range(5):
-                tmp:pd.DataFrame = countSynthesizer.generate_samples(nCases)
-                tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-            tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-            counts = pd.concat([counts,tmp_counts], ignore_index=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-        return(counts)
-
-    elif tumor == "Liver-HCC":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] < nCases:
-            # Model 1
-            x1_counts:pd.DataFrame = pd.DataFrame()
-            while x1_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x1'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x1_counts = pd.concat([x1_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x1_counts = x1_counts.sample(frac = 0.90).reset_index(drop=True)
-
-            # Model 2
-            x2_counts:pd.DataFrame = pd.DataFrame()
-            while x2_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x2'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x2_counts = pd.concat([x2_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x2_counts = x2_counts.loc[x2_counts["SBS8"]!=0]
-            
-            # Merge
-            counts:pd.DataFrame = pd.concat([counts, x1_counts, x2_counts], ignore_index=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-        return(counts)
-    
-    elif tumor == "Lymph-CLL":
-        mCases:int = round(nCases*0.42)
-        uCases:int = nCases - mCases
-
-        # MCLL
-        m_counts:pd.DataFrame = pd.DataFrame()
-        while m_counts.shape[0] < nCases:
-            ## Model 1
-            x1m_counts:pd.DataFrame = pd.DataFrame()
-            while x1m_counts.shape[0] < mCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['MUT']['x1'].generate_samples(mCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, 'Lymph-MCLL', corrections, exclusions)
-                x1m_counts = pd.concat([x1m_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x1m_counts['total'] = x1m_counts.sum(axis=1)
-            x1m_counts['keep'] = x1m_counts.apply(lambda x: 
-                                                    np.where((x['SBS8']/x['total']*100 >= 5) & (x['SBS8']/x['total']*100 <= 10),
-                                                            False,
-                                                            True),
-                                axis=1)
-            x2m_n_keep = x1m_counts.loc[x1m_counts["keep"]==False].shape[0]
-            x1m_counts = x1m_counts.loc[x1m_counts["keep"]==True]
-            x1m_counts = x1m_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            ## Model 2
-            x2m_counts:pd.DataFrame = pd.DataFrame()
-            while x2m_counts.shape[0] < mCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['MUT']['x2'].generate_samples(mCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, 'Lymph-MCLL', corrections, exclusions)
-                x2m_counts = pd.concat([x2m_counts,tmp_counts], ignore_index=True)
-            ### Specific model filters
-            x2m_counts = x2m_counts.sample(n=x2m_n_keep)
-
-            ## Merge
-            m_counts:pd.DataFrame = pd.concat([m_counts, x1m_counts, x2m_counts], ignore_index=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = m_counts.shape[0]
-                m_counts = preprocess_counts(m_counts, tumor, corrections, exclusions)
-                end_shape:int = m_counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-        
-        # Return MCLL counts
-        m_counts = m_counts.sample(n=mCases).reset_index(drop=True)
-        m_counts.fillna(0, inplace=True)
-
-        # UCLL
-        u_counts:pd.DataFrame = pd.DataFrame()
-        while u_counts.shape[0] < nCases:
-            ## Model 1
-            x1u_counts:pd.DataFrame = pd.DataFrame()
-            while x1u_counts.shape[0] < uCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['UNMUT']['x1'].generate_samples(uCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, 'Lymph-UCLL', corrections, exclusions)
-                x1u_counts = pd.concat([x1u_counts,tmp_counts], ignore_index=True)
-            ### Specific model filters
-            x1u_counts = x1u_counts.sample(frac=0.85)
-
-            ## Model 2
-            x2u_counts:pd.DataFrame = pd.DataFrame()
-            while x2u_counts.shape[0] < uCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['UNMUT']['x2'].generate_samples(uCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, 'Lymph-UCLL', corrections, exclusions)
-                x2u_counts = pd.concat([x2u_counts,tmp_counts], ignore_index=True)
-            ### Specific model filters
-            x2u_counts['total'] = x2u_counts.sum(axis=1)
-            x2u_counts['keep'] = x2u_counts.apply(lambda x: 
-                                                    np.where((x['SBS5']/x['total']*100 >= 75),
-                                                            True,
-                                                            False),
-                                axis=1)
-            x2u_counts = x2u_counts.loc[x2u_counts["keep"]==True]
-            x2u_counts = x2u_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            ## Merge
-            u_counts:pd.DataFrame = pd.concat([u_counts, x1u_counts, x2u_counts], ignore_index=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = u_counts.shape[0]
-                u_counts = preprocess_counts(u_counts, tumor, corrections, exclusions)
-                end_shape:int = u_counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-        
-        # Return UCLL counts
-        u_counts = u_counts.sample(n=uCases).reset_index(drop=True)
-        u_counts.fillna(0, inplace=True)
-
-        # Merge MCLL and UCLL
-        counts:pd.DataFrame = pd.concat([m_counts, u_counts], ignore_index=True)
-        counts = counts.sample(frac=1)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-
-        # Return counts
-        return(counts)
-    
-    elif tumor == "Panc-Endocrine":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] < nCases:
-            # Model 1
-            x1_counts:pd.DataFrame = pd.DataFrame()
-            while x1_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x1'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x1_counts = pd.concat([x1_counts,tmp_counts], ignore_index=True)
-
-            # Model 2
-            x2_counts:pd.DataFrame = pd.DataFrame()
-            while x2_counts.shape[0] < nCases:
-                tmp_counts:pd.DataFrame = pd.DataFrame()
-                for _ in range(5):
-                    tmp:pd.DataFrame = countSynthesizer['x2'].generate_samples(nCases)
-                    tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-                tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-                x2_counts = pd.concat([x2_counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            x2_counts['total'] = x2_counts.sum(axis=1)
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                np.where((x['SBS13'] / x['total'] < 0.1) & (x['SBS13'] / x['total'] > 0.02),
-                                                        True,
-                                                        False),
-                                                axis=1)
-            x2_counts = x2_counts.loc[x2_counts["keep"]==True]
-            x2_counts['keep'] = x2_counts.apply(lambda x: 
-                                                np.where(x['SBS2'] / x['total'] > 0.02,
-                                                        np.random.choice([True, False], p=[0.3, 0.7]),
-                                                        True),
-                                                axis=1)
-            x2_counts = x2_counts.loc[x2_counts["keep"]==True]
-            x2_counts = x2_counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-            
-            # Merge
-            counts:pd.DataFrame = pd.concat([counts, x1_counts, x2_counts], ignore_index=True)
-            ## General filters
-            counts['total'] = counts.sum(axis=1)
-            counts['SBS13'] = counts.apply(lambda x:
-                                            np.where((x['SBS13'] / x['total'] > 0.1) & (x['SBS13'] / x['total'] < 0.25),
-                                                    x['SBS13']/3,
-                                                    x['SBS13']),
-                                            axis=1)
-            counts['SBS5'] = counts.apply(lambda x:
-                                            np.where((x['SBS5'] / x['total'] < 0.5) & (x['total'] < 5000),
-                                                    np.random.choice([x['SBS5']*2, x['SBS5']]),
-                                                    x['SBS5']),
-                                            axis=1)
-            counts['keep'] = counts.apply(lambda x:
-                                        np.where(((x['SBS13'] == 0) & (x['SBS2'] != 0)) | ((x['SBS13'] != 0) & (x['SBS2'] == 0)), 
-                                                False,
-                                                True),
-                                        axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts['keep'] = counts.apply(lambda x:
-                                        np.where((x['SBS36']/x['total'] < 0.25) & (x['SBS36'] != 0) & (x['SBS2'] != 0), 
-                                                False,
-                                                True),
-                                        axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts['keep'] = counts.apply(lambda x:
-                                        np.where((x['SBS5']/x['total'] > 0.7) & (x['SBS13'] != 0), 
-                                                False,
-                                                True),
-                                        axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts['keep'] = counts.apply(lambda x:
-                                        np.where((x['SBS2'] == 0) & (x['SBS13'] == 0) & (x['SBS19'] == 0) & (x['SBS36'] == 0) & (x['SBS30'] != 0), 
-                                                False,
-                                                True),
-                                        axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts = counts.drop(['keep', 'total'], axis=1).reset_index(drop=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        return(counts)
-
-    elif tumor == "Prost-AdenoCA":
-        counts:pd.DataFrame = pd.DataFrame()
-        while counts.shape[0] < nCases:
-            tmp_counts:pd.DataFrame = pd.DataFrame()
-            for _ in range(5):
-                tmp:pd.DataFrame = countSynthesizer.generate_samples(nCases)
-                tmp_counts = pd.concat([tmp_counts,tmp], ignore_index=True)
-            tmp_counts = preprocess_counts(tmp_counts, tumor, corrections, exclusions)
-            counts = pd.concat([counts,tmp_counts], ignore_index=True)
-            ## Specific model filters
-            counts['total'] = counts.sum(axis=1)
-            counts['keep'] = counts.apply(lambda x: 
-                                                np.where((x['SBS8'] / x['total'] > 0.1) & (x['total'] > 20000) & (x['total'] < 60000),
-                                                        False,
-                                                        True),
-                                                axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts = counts.drop(['keep'], axis=1).reset_index(drop=True)
-            ## General filters
-            counts['keep'] = counts.apply(lambda x: 
-                                                np.where((x['SBS1'] != 0) & (x['SBS37'] != 0) & (x['SBS1'] / x['total'] > 0.2),
-                                                        False,
-                                                        np.where((x['SBS37'] != 0) & (x['SBS40'] != 0) & ((x['SBS40'] / x['total'] > 0.55) | (x['SBS40'] / x['total'] < 0.25)),
-                                                                False,
-                                                                True)),
-                                                axis=1)
-            counts = counts.loc[counts["keep"]==True]
-            counts = counts.drop(['total', 'keep'], axis=1).reset_index(drop=True)
-
-            # Be sure donors' counts meet requirements
-            i:int = 0
-            while True:
-                initial_shape:int = counts.shape[0]
-                counts = preprocess_counts(counts, tumor, corrections, exclusions)
-                end_shape:int = counts.shape[0]
-                i += 1
-                if (initial_shape == end_shape) | (i > 10):
-                    break
-
-        # Return counts
-        counts = counts.sample(n=nCases).reset_index(drop=True)
-        counts.fillna(0, inplace=True)
-        counts = counts.round(0).astype(int)
-        return(counts)
-    
-def simulate_vaf_rank(tumor, nCases) -> list:
-
-    """
-    Function to simulate the VAF range for each donor
-    """
-
-    rank_file:pd.DataFrame = pd.read_csv("/oncoGAN/trained_models/vaf_rank_list.tsv", sep='\t') 
-    rank_file = rank_file.loc[rank_file["study"]==tumor]
-    donor_vafs:list = random.choices(rank_file.columns[1:], weights=rank_file.values[0][1:], k=nCases)
-
-    return(donor_vafs)
-
-def simulate_drivers(tumor, driversSynthesizer) -> pd.DataFrame:
-
-    """
-    Function to simulate the driver mutations for each donor
-    """
-
-    if tumor == "Breast-AdenoCa":
-        drivers:pd.DataFrame = driversSynthesizer['model'].generate_samples(10)
-        drivers = drivers.round(0).astype(int)
-        drivers['ERBB4_Intron'] = drivers.apply(lambda x: 
-                                                        np.where((x['ERBB4_Intron'] == 2) | (x['ERBB4_Intron'] == 5),
-                                                                 np.random.choice([x['ERBB4_Intron'], x['ERBB4_Intron'] - 1], p=[0.7, 0.3]),
-                                                                 x['ERBB4_Intron']),
-                                                        axis=1)
-        drivers['ERBB4_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['ERBB4_Intron'] != 0,
-                                                                 np.random.choice([x['ERBB4_Intron'], 0], p=[0.6, 0.4]),
-                                                                 x['ERBB4_Intron']),
-                                                        axis=1)
-        drivers['RUNX1_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['RUNX1_Intron'] != 0,
-                                                                 np.random.choice([x['RUNX1_Intron'], 0], p=[0.4, 0.6]),
-                                                                 x['RUNX1_Intron']),
-                                                        axis=1)
-        drivers['TP53_Coding'] = drivers.apply(lambda x: 
-                                                        np.where(x['TP53_Coding'] != 0,
-                                                                 np.random.choice([x['TP53_Coding'], 0], p=[0.5, 0.5]),
-                                                                 x['TP53_Coding']),
-                                                        axis=1)
-        drivers['MAP3K1_Coding'] = drivers.apply(lambda x: 
-                                                        np.where(x['MAP3K1_Coding'] != 0,
-                                                                 np.random.choice([x['MAP3K1_Coding'], 0], p=[0.5, 0.5]),
-                                                                 x['MAP3K1_Coding']),
-                                                        axis=1)
-        drivers['ARID1B_Coding'] = drivers.apply(lambda x: 
-                                                        np.where(x['ARID1B_Coding'] != 0,
-                                                                 np.random.choice([x['ARID1B_Coding'], 0], p=[0.6, 0.4]),
-                                                                 x['ARID1B_Coding']),
-                                                        axis=1)
-        drivers['NOTCH2_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['NOTCH2_Intron'] != 0,
-                                                                 np.random.choice([x['NOTCH2_Intron'], 0], p=[0.6, 0.4]),
-                                                                 x['NOTCH2_Intron']),
-                                                        axis=1)
-        drivers['INPP4B_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['INPP4B_Intron'] != 1,
-                                                                 np.random.choice([x['INPP4B_Intron'], 0], p=[0.3, 0.7]),
-                                                                 x['INPP4B_Intron']),
-                                                        axis=1)
-        drivers['CBFB_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['CBFB_Intron'] != 1,
-                                                                 np.random.choice([x['CBFB_Intron'], 0], p=[0.5, 0.5]),
-                                                                 x['CBFB_Intron']),
-                                                        axis=1)
-        drivers['STAG2_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['STAG2_Intron'] != 1,
-                                                                 np.random.choice([x['STAG2_Intron'], 0], p=[0.4, 0.6]),
-                                                                 x['STAG2_Intron']),
-                                                        axis=1)
-        drivers['ANK3_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['ANK3_Intron'] != 3,
-                                                                 np.random.choice([x['ANK3_Intron'], 0], p=[0.4, 0.6]),
-                                                                 x['ANK3_Intron']),
-                                                        axis=1)
-    
-    elif tumor == "Kideny-RCC":
-        drivers:pd.DataFrame = driversSynthesizer['model'].generate_samples(10)
-        drivers = drivers.round(0).astype(int)
-        drivers['VHL_Coding'] = drivers.apply(lambda x: 
-                                                        np.where(x['VHL_Coding'] != 0,
-                                                                 np.random.choice([x['VHL_Coding'], 0], p=[0.8, 0.2]),
-                                                                 x['VHL_Coding']),
-                                                        axis=1)
-        drivers['TSC2_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['TSC2_Intron'] != 0,
-                                                                 np.random.choice([x['TSC2_Intron'], 0], p=[0.4, 0.6]),
-                                                                 x['TSC2_Intron']),
-                                                        axis=1)
-        drivers['MET_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['MET_Intron'] != 0,
-                                                                 np.random.choice([x['MET_Intron'], 0], p=[0.6, 0.4]),
-                                                                 x['MET_Intron']),
-                                                        axis=1)
-    
-    elif tumor == "Lymph-MCLL":        
-        tmp_drivers:pd.DataFrame = driversSynthesizer['MUT']['model'].generate_samples(10)
-        tmp_drivers = tmp_drivers.round(0).astype(int)
-        tmp_drivers_CD36:pd.DataFrame = tmp_drivers[tmp_drivers['CD36_Intron'] != 1].reset_index(drop=True)
-        tmp_drivers_CD36_1:pd.DataFrame = tmp_drivers[tmp_drivers['CD36_Intron'] == 1].sample(frac=0.4).reset_index(drop=True)
-        drivers:pd.DataFrame = pd.concat([tmp_drivers_CD36,tmp_drivers_CD36_1], ignore_index=True)
-    
-    elif tumor == "Lymph-UCLL":
-        x1_tmp_drivers:pd.DataFrame = driversSynthesizer['UNMUT']['model']['x1'].generate_samples(10)
-        x2_tmp_drivers:pd.DataFrame = driversSynthesizer['UNMUT']['model']['x2'].generate_samples(10)
-        x3_tmp_drivers:pd.DataFrame = driversSynthesizer['UNMUT']['model']['x3'].generate_samples(10)
-        drivers:pd.DataFrame = pd.concat([x1_tmp_drivers, x2_tmp_drivers, x3_tmp_drivers], ignore_index=True)
-   
-    elif tumor == "Panc-Endocrine":
-        x1_tmp_drivers:pd.DataFrame = driversSynthesizer['model']['x1'].generate_samples(10)
-        x2_tmp_drivers:pd.DataFrame = driversSynthesizer['model']['x2'].generate_samples(10)
-        drivers:pd.DataFrame = pd.concat([x1_tmp_drivers, x2_tmp_drivers], ignore_index=True)
-        drivers = drivers.round(0).astype(int)
-        drivers['PTEN_Coding'] = drivers.apply(lambda x: 
-                                                        np.where(x['PTEN_Coding'] == 1,
-                                                                    np.random.choice([x['PTEN_Coding'], 0]),
-                                                                    x['PTEN_Coding']),
-                                                        axis=1)
-    
-    elif tumor == "Prost-AdenoCA":
-        drivers:pd.DataFrame = driversSynthesizer['model'].generate_samples(10)
-        drivers = drivers.round(0).astype(int)
-        drivers['FIP1L1_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['FIP1L1_Intron'] != 0,
-                                                                 np.random.choice([x['FIP1L1_Intron'], 0], p=[0.7, 0.3]),
-                                                                 x['FIP1L1_Intron']),
-                                                        axis=1)
-        drivers['MAD1L1_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['MAD1L1_Intron'] != 0,
-                                                                 np.random.choice([x['MAD1L1_Intron'], 0], p=[0.7, 0.3]),
-                                                                 x['MAD1L1_Intron']),
-                                                        axis=1)
-        drivers['SCAI_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['SCAI_Intron'] != 0,
-                                                                 np.random.choice([x['SCAI_Intron'], 0], p=[0.7, 0.3]),
-                                                                 x['SCAI_Intron']),
-                                                        axis=1)
-        drivers['ZFHX3_Intron'] = drivers.apply(lambda x: 
-                                                        np.where(x['ZFHX3_Intron'] > 2,
-                                                                 0,
-                                                                 x['ZFHX3_Intron']),
-                                                        axis=1)
-    
-    else:
-        drivers:pd.DataFrame = driversSynthesizer['model'].generate_samples(10)
-
-    drivers.fillna(0, inplace=True)
-    drivers = drivers.round(0).astype(int)
-    drivers = drivers.sample(frac=1).reset_index(drop=True)
-    drivers = drivers.iloc[1]
-
-    return(drivers)
-
-def vaf_rank2float(vafs_rank_list) -> list:
-
-    """
-    Convert the VAF rank to a float value
-    """
-
-    final_vaf_list:list = []
-    for vaf in vafs_rank_list:
-        vaf:str = re.sub(r'[\[\)\]]', '', vaf)
-        start:float = float(vaf.split(',')[0])
-        end:float = float(vaf.split(',')[1])
-        final_vaf_list.append(round(random.uniform(start, end), 2))
-
-    return(final_vaf_list)
-
-def filter_muts(file) -> pd.DataFrame: 
-
-    """
-    Remove incorrect mutations generated by the GAN
-    """
-
-    # Annotate the type of mutation
-    conditions:list = [
-        ((file['a.ctx1'] == file['r.ctx1']) & (file['a.ctx2'] != file['r.ctx2']) & (file['a.ctx3'] == file['r.ctx3']) & (file['a.ctx2'] != '.') & (file['signature'] != '.')),
-        ((file['a.ctx1'] == file['r.ctx1']) & (file['a.ctx2'] != file['r.ctx2']) & (file['a.ctx3'] != file['r.ctx3']) & (file['a.ctx2'] != '.') & (file['a.ctx3'] != '.') & (file['signature'] == '.')),
-        ((file['a.ctx1'] != file['r.ctx1']) & (file['a.ctx2'] != file['r.ctx2']) & (file['a.ctx3'] != file['r.ctx3']) & (file['a.ctx1'] != '.') & (file['a.ctx2'] != '.') & (file['a.ctx3'] != '.') & (file['signature'] == '.')),
-        ((file['a.ctx1'] == '.') & (file['a.ctx2'] == '.') & (file['a.ctx3'] == '.') & (file['len'] > 0) & (file['signature'] == '.')),
-        ((file['a.ctx1'] == '.') & (file['a.ctx2'] == '.') & (file['a.ctx3'] == '.') & (file['len'] < 0) & (file['signature'] == '.'))
-    ]
-    mutations:list = ['SNP', 'DNP', 'TNP', 'INS', 'DEL']
-    file['mut'] = np.select(conditions, mutations, default='Error')
-    file = file.loc[file["mut"] != "Error"]
-
-    # Create the r.ctx and a.ctx columns to be used in the next step
-    file["r.ctx"] = file["r.ctx1"]+file["r.ctx2"]+file["r.ctx3"]
-    file["a.ctx"] = file["a.ctx1"]+file["a.ctx2"]+file["a.ctx3"]
-    file = file[~(file['r.ctx'].str.contains('N') | file['a.ctx'].str.contains('N'))]
-    file.drop(["start", "vaf", "r.ctx1", "r.ctx2", "r.ctx3", "a.ctx1", "a.ctx2", "a.ctx3"], axis=1, inplace=True)
-
-    return(file)
-
-def manually_simulate_dnp_tnp(mutSynthesizer, nMut, mut_type, tumor) -> pd.DataFrame:
-    
-        """
-        Function to manually simulate DNP and TNP mutations
-        """
-    
-        nt_dict = {'A':['C', 'G', 'T'], 'C':['A', 'G', 'T'], 'G':['A', 'C', 'T'], 'T':['A', 'C', 'G']}
-        if tumor == "Lymph-MCLL":
-            muts = mutSynthesizer['MUT'].generate_samples(int(nMut)*20)
-        elif tumor == "Lymph-UCLL":
-            muts = mutSynthesizer['UNMUT'].generate_samples(int(nMut)*20)
-        else:
-            muts = mutSynthesizer.generate_samples(int(nMut)*20)
-        muts = filter_muts(muts)
-        muts = muts[muts['mut'] == 'SNP']
-        muts = muts.take(indices=range(int(nMut)), axis=0)
-        muts['mut'] = mut_type
-        muts['signature'] = '.'
-        if mut_type == 'DNP':
-            muts['a.ctx'] = muts['a.ctx'].apply(lambda x:f"{x[0]}{x[1]}{random.choice(nt_dict[x[2]])}")
-        else:
-            muts['a.ctx'] = muts['a.ctx'].apply(lambda x:f"{random.choice(nt_dict[x[0]])}{x[1]}{random.choice(nt_dict[x[2]])}")
-    
-        return(muts)
-
-def simulate_mutations(mutSynthesizer, muts, nMut, case_counts, tumor) -> pd.DataFrame:
-
-    """
-    Function to easily generate all the mutations for a case
-    """
-
-    # Initialize the variables
-    generated_types:pd.Series = pd.Series()
-    oriVSsim_types:pd.Series = pd.Series()
-    first:bool = True
-    rounds:int = 0
-
-    # Enter in a loop until the number of mutations generated is the same as the number of mutations that have to be generated
-    while (not all(oriVSsim_types==0)) or first:
-        first = False
-        ## Generate and filter the mutations
-        if tumor == "Lymph-MCLL":
-            tmp_muts:pd.DataFrame = mutSynthesizer['MUT'].generate_samples(int(round(nMut*30,0)))
-        elif tumor == "Lymph-UCLL":
-            tmp_muts:pd.DataFrame = mutSynthesizer['UNMUT'].generate_samples(int(round(nMut*30,0)))
-        else:    
-            tmp_muts:pd.DataFrame = mutSynthesizer.generate_samples(int(round(nMut*30,0)))
-        tmp_muts = filter_muts(tmp_muts)
-        muts = pd.concat([muts,tmp_muts])
-        ## Check the number and type of the generated mutations
-        tmp_generated_types = tmp_muts.apply(lambda x:x['mut'] if x['signature'] == '.' else x['signature'], axis=1).value_counts()
-        tmp_generated_types, generated_types = tmp_generated_types.align(generated_types, fill_value=0)
-        generated_types += tmp_generated_types
-        case_counts, generated_types = case_counts.align(generated_types, fill_value=0)
-        oriVSsim_types = case_counts - generated_types
-        oriVSsim_types[oriVSsim_types < 0] = 0
-        ## Break the loop if it is taking too long
-        if rounds == 20:
-            if 'DNP' in oriVSsim_types.index and oriVSsim_types['DNP'] > 0:
-                dnp_muts = manually_simulate_dnp_tnp(mutSynthesizer, oriVSsim_types['DNP'], 'DNP', tumor)
-                muts = pd.concat([muts,dnp_muts])
-                oriVSsim_types['DNP'] = 0
-            if 'TNP' in oriVSsim_types.index and oriVSsim_types['TNP'] > 0:
-                tnp_muts = manually_simulate_dnp_tnp(mutSynthesizer, oriVSsim_types['TNP'], 'TNP', tumor)
-                muts = pd.concat([muts,tnp_muts])
-                oriVSsim_types['TNP'] = 0
-            ## If there are still some mutations that are not simulated remove them from case_counts
-            case_counts = case_counts - oriVSsim_types
-            break
-        rounds += 1
-
-    muts.reset_index(drop=True, inplace=True)
-
-    return(muts, case_counts)
-
-def select_case_mutations(muts, case_counts) -> list:
-
-    """
-    Function to select the mutations from the whole mutations database for a case
-    """
-    
-    case_muts:pd.DataFrame = pd.DataFrame()
-    for mut,n in zip(case_counts.index, case_counts):
-        if n == 0:
-            continue
-        else:
-            if mut.startswith("SBS"):
-                col = "signature"
-            else:
-                col = "mut"
-            tmp:pd.DataFrame = muts[(muts[col]==mut)].take(indices=range(int(n)), axis=0)
-
-            ## Update case mutations dataframe
-            case_muts = pd.concat([case_muts,tmp])
-            case_muts.reset_index(drop=True, inplace=True)
-            ## Update muts dataframe
-            muts.drop(labels=tmp.index, axis=0, inplace=True)
-            muts.reset_index(drop=True, inplace=True)
-            
-    return(muts, case_muts)
-
-def gender_selection(tumor) -> str:
-
-    """
-    Simulate the gender
-    """
-
-    if tumor in ["Breast-AdenoCa", "Breast-DCIS", "Breast-LobularCa", "Ovary-AdenoCA"]:
-        gender:str = "F"
-    elif tumor in ["Prost-AdenoCA"]:
-        gender:str = "M"
-    else:
-        gender:str = "M" if random.random() < 0.5 else "F"
-    
-    return(gender)
-
-def assign_chromosome(positions, cna=False, sv=False, gender=None) -> pd.DataFrame:
-    
-    """
-    Function to assign a chromosome to each position
-    """
-    
-    # Positions are encoded in a continuous scale, so we need to decode them
-    if (cna or sv) and gender == 'F':
-        position_decode:np.array  = np.array([0,249250621,492449994,690472424,881626700,1062541960,1233657027,1392795690,1539159712,1680373143,1815907890,1950914406,2084766301,2199936179,2307285719,2409817111,2500171864,2581367074,2659444322,2718573305,2781598825,2829728720,2881033286])
-        max_length:int = 3036303846
-        chromosome_decode:np.array  = np.array(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','X'])
-    else:
-        position_decode:np.array  = np.array([0,249250621,492449994,690472424,881626700,1062541960,1233657027,1392795690,1539159712,1680373143,1815907890,1950914406,2084766301,2199936179,2307285719,2409817111,2500171864,2581367074,2659444322,2718573305,2781598825,2829728720,2881033286,3036303846])
-        max_length:int = 3095677412
-        chromosome_decode:np.array  = np.array(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','X','Y'])
-
-    if not (cna or sv):
-        start_encoded:np.array  = np.digitize(positions["start"], position_decode, right=True)
-        end_encoded:np.array  = np.digitize(positions["end"], position_decode, right=True)
-        ## Assign new columns
-        positions["start"] = positions["start"] - np.take(position_decode, start_encoded-1)
-        positions["end"] = positions["end"] - np.take(position_decode, end_encoded-1)
-        positions["start_chrom"] = np.take(chromosome_decode, start_encoded-1)
-        positions["end_chrom"] = np.take(chromosome_decode, end_encoded-1)
-        
-        # Because the scale is continuous, some positions might be assigned to the next chromosome
-        positions = positions[positions['start_chrom'] == positions['end_chrom']]
-        positions.drop('end_chrom', axis=1, inplace=True)
-        positions.rename(columns={'start_chrom':'chrom'}, inplace=True)
-    elif cna:
-        positions['pos'] = positions['len'].cumsum()
-        pos_encoded:np.array  = np.digitize(positions["pos"], position_decode, right=True)
-        ## Assign new columns
-        positions["pos"] = positions["pos"] - np.take(position_decode, pos_encoded-1)
-        positions["chrom"] = np.take(chromosome_decode, pos_encoded-1)
-    elif sv:
-        ## Extend chromosomes
-        position_decode = np.concatenate((position_decode, position_decode+max_length))
-        chromosome_decode = np.concatenate((chromosome_decode, chromosome_decode))
-
-        start_encoded:np.array  = np.digitize(positions["start"], position_decode, right=True)
-        end_encoded:np.array  = np.digitize(positions["end"], position_decode, right=True)
-        ## Assign new columns
-        positions["start"] = positions["start"] - np.take(position_decode, start_encoded-1)
-        positions["end"] = positions["end"] - np.take(position_decode, end_encoded-1)
-        positions["chrom1"] = np.take(chromosome_decode, start_encoded-1)
-        positions["chrom2"] = np.take(chromosome_decode, end_encoded-1)
-        positions.rename(columns={'start':'start1', 'end':'start2'}, inplace=True)
-
-        ## Remove interchromosomal DEL, DUP, INV and intrachromosomal TRA
-        positions['keep'] = False
-        positions.loc[(positions['svclass'] != 'TRA') & (positions['chrom1'] == positions['chrom2']), 'keep'] = True
-        positions.loc[(positions['svclass'] == 'TRA') & (positions['chrom1'] != positions['chrom2']), 'keep'] = True
-        positions = positions[positions['keep']].drop(columns=['keep'])
-
-    return(positions)
-
-def get_sequence(positions, fasta, posQueue=None) -> pd.DataFrame:
-    
-    """
-    Function to get the DNA sequence of each position
-    """
-
-    chr_prefix:bool = True if 'chr1' in fasta.keys() else False
-    
-    for i, row in positions.iterrows():
-        if chr_prefix:
-            chrom:str = f"chr{str(row['chrom'])}"
-        else:
-            chrom:str = str(row['chrom'])
-        start:int = int(row['start'])
-        end:int = int(row['end'])
-        sequence:str = fasta[chrom][start:end].seq
-        positions.at[i, 'sequence'] = sequence
-
-    if posQueue is not None:
-        posQueue.put(positions)
-    else:
-        return(positions)
-
-def get_sexual_chrom_usage(tumor, gender) -> dict:
-
-    """
-    Function to get the sexual chromosome usage
-    """
-
-    sexChrFile:pd.DataFrame = pd.read_csv("/oncoGAN/trained_models/xy_ranks.txt", sep='\t') 
-    sexChrFile = sexChrFile.loc[sexChrFile["label"].isin([f'{tumor}_X{gender}', f'{tumor}_Y{gender}'])]
-    sexChrFile['label'] = sexChrFile['label'].apply(lambda x:x[-2])
-
-    sexChrDict:dict = {}
-    for _,entry in sexChrFile.iterrows():
-        rank:str = random.choice(entry['ranks'].split(';'))
-        rankList:list = rank.strip('[').strip(']').split(',')
-        rankList = [float(i) for i in rankList]
-        rankValue:float = round(random.uniform(rankList[0], rankList[1]), 1)
-        sexChrDict[entry['label']] = rankValue
-
-    return(sexChrDict)
-
-def get_coordinates(posSynthesizer, nMut, sexChrom) -> pd.DataFrame:
-
-    """
-    Function to generate the coordinates of the mutations
-    """
-
-    # Generate the windows
-    if sexChrom == 'X':
-        x_ranks:list = ['[2.88e+07;2.91e+07)', '[2.91e+07;2.94e+07)' , '[2.94e+07;2.97e+07)', '[2.97e+07;3e+07)', '[3e+07;3.03e+07)', '[3.03e+07;3.06e+07)']
-        step1:pd.DataFrame = pd.DataFrame()
-        while step1.value_counts().sum() < nMut:
-            tmp:pd.DataFrame = posSynthesizer['step1'].sample(num_rows = round(nMut*5))
-            tmp = tmp[tmp['rank'].isin(x_ranks)]
-            step1 = pd.concat([step1, tmp], ignore_index=True)
-    elif sexChrom == 'Y':
-        y_ranks:list = ['[3.03e+07;3.06e+07)', '[3.06e+07;3.09e+07)', '[3.09e+07;3.1e+07]']
-        step1:pd.DataFrame = pd.DataFrame()
-        while step1.value_counts().sum() < nMut:
-            tmp:pd.DataFrame = posSynthesizer['step1'].sample(num_rows = round(nMut*5))
-            tmp = tmp[tmp['rank'].isin(y_ranks)]
-            step1 = pd.concat([step1, tmp], ignore_index=True)
-    else:
-        step1:pd.DataFrame = posSynthesizer['step1'].sample(num_rows = round(nMut*1.2))
-    step1 = step1['rank'].value_counts()
-
-    # Generate the specific position ranges
-    positions:pd.DataFrame = pd.DataFrame()
-    for rank, n in zip(step1.index, step1):
-        try:
-            positions = pd.concat([positions, posSynthesizer[rank].sample(num_rows = n)])
-        except KeyError:
-            continue
-    positions['start'] = positions['start']*100
-    positions['end'] = positions['start']+100
-    positions.reset_index(drop=True, inplace=True)
-
-    # Annotate the chromosome
-    positions = assign_chromosome(positions)
-
-    return(positions)
-
-def update_sexual_chrom_positions(positions, sexChrom, exp, posSynthesizer) -> pd.DataFrame:
-
-    """
-    Function to match the number of mutations in sex chromosome positions
-    """
-
-    # Split autosomal and sexual chromosomes
-    normChr:pd.DataFrame = positions[positions['chrom'] != sexChrom]
-    sexChr:pd.DataFrame = positions[positions['chrom'] == sexChrom]
-
-    # Calculate the number of mutations previously simulated in the sexual chromosome
-    obs:int = sexChr['chrom'].value_counts().get(sexChrom, 0)
-
-    # Calculate how many mutations need to be udpated
-    difference:int = obs-exp
-
-    # Update mutations
-    update:bool = True
-    while difference != 0:
-        if difference > 0: #More X/Y mutations than expected
-            if update: #Remove excess mutations
-                sexChr.drop(sexChr.sample(n=difference).index, inplace=True)
-                sexChr.reset_index(drop=True, inplace=True)
-                update = False
-            ## Generate the new positions for autosomal chromosomes
-            tmp_positions:pd.DataFrame = get_coordinates(posSynthesizer, difference*10, None)
-            tmp_positions = tmp_positions[tmp_positions['chrom'] != sexChrom]
-            ## Update positions database
-            try:
-                normChr = pd.concat([normChr, tmp_positions.sample(n=difference)])
-                normChr.reset_index(drop=True, inplace=True)
-                difference = 0
-            except ValueError:
-                normChr = pd.concat([normChr, tmp_positions])
-                normChr.reset_index(drop=True, inplace=True)
-                difference -= tmp_positions.shape[0]
-        else: #Less X/Y mutations than expected
-            if update: #Remove excess mutations
-                normChr.drop(normChr.sample(n=abs(difference)).index, inplace=True)
-                normChr.reset_index(drop=True, inplace=True)
-                update = False
-            ## Generate the new positions for sexual chromosomes
-            tmp_positions:pd.DataFrame = get_coordinates(posSynthesizer, abs(difference)*100, sexChrom)
-            tmp_positions = tmp_positions[tmp_positions['chrom'] == sexChrom]
-            ## Update positions database
-            try:
-                sexChr = pd.concat([sexChr, tmp_positions.sample(n=abs(difference))])
-                sexChr.reset_index(drop=True, inplace=True)
-                difference = 0
-            except ValueError:
-                sexChr = pd.concat([sexChr, tmp_positions])
-                sexChr.reset_index(drop=True, inplace=True)
-                difference += tmp_positions.shape[0]
-    positions = pd.concat([normChr, sexChr])
-    positions.reset_index(drop=True, inplace=True)
-
-    return(positions)
-
-def generate_positions(posSynthesizer, nMut, fasta, cpus, sexChrDict) -> pd.DataFrame: 
-
-    """
-    Function to generate the positions of the mutations
-    """
-
-    # Get the coordinates of the future positions
-    positions:pd.DataFrame = get_coordinates(posSynthesizer, nMut, None)
-
-    # Update sexual chromosome positions
-    for key in sexChrDict.keys():
-        exp:int = int(round(nMut * sexChrDict[key] / 100, 0))
-        positions = update_sexual_chrom_positions(positions, key, exp, posSynthesizer)
-    
-    # Identify the corresponding DNA sequence
-    if cpus > 1:
-        jobs:list = []
-        posQueue = multiprocessing.Queue()
-
-        # Split the file according to the number of available cpus
-        posList:list = np.array_split(positions, cpus)
-
-        # Create the jobs
-        for pos in posList:
-            p = multiprocessing.Process(target=get_sequence, args=(pos, fasta, posQueue))
-            jobs.append(p)
-
-        # Start the jobs
-        for j in jobs:
-            j.start()
-        # Get the results from the queue
-        posQueue_result:list = []
-        while True:
-            posRes = posQueue.get()
-            posQueue_result.append(posRes)
-            if len(posQueue_result) == cpus:
-                break
-        # Wait for the jobs to finish
-        for j in jobs:
-            j.join()
-        # Concatenate the results
-        positions = pd.concat(posQueue_result).reset_index(drop=True)
-    else:
-        positions = get_sequence(positions, fasta)
-
-    # Shuffle the positions
-    positions = positions.sample(frac=1).reset_index(drop=True)
-
-    return(positions)
-
-def assign_position(tumor, case_counts, case_muts, posModel, nMut, fasta, gender, cpus) -> pd.DataFrame:
-
-    """
-    Function to assign a position to each mutation
-    """
-
-    # posModel selection
-    if tumor == "Lymph-CLL":
-        if 'SBS9' in case_counts.index and case_counts['SBS9'] > 0: #AID signature
-            posModel = posModel['MUT']
-        else:
-            posModel = posModel['UNMUT']
-    else:
-        pass
-
-    # Get sexual chromosome ranks
-    sexChrDict:dict = get_sexual_chrom_usage(tumor, gender)
-
-    # Initialize new columns with NaN values
-    case_muts['chrom'] = pd.Series([np.nan]*len(case_muts))
-    case_muts['pos'] = pd.Series([np.nan]*len(case_muts))
-
-    # Assign positions
-    while nMut > 0:
-        ## Generate the positions
-        positions:pd.DataFrame = generate_positions(posModel, nMut, fasta, cpus, sexChrDict)
-        ## Find the correct one for the specific context
-        for idx, mut in case_muts.loc[case_muts['chrom'].isna()].iterrows():
-            r_ctx:str = mut['r.ctx']
-            for pos_idx, pos in positions.iterrows():
-                seq:str = pos['sequence']
-                indexes:list = [m.start() for m in re.finditer(r_ctx, seq)]
-                if indexes:
-                    case_muts.at[idx, 'chrom'] = pos['chrom']
-                    case_muts.at[idx, 'pos'] = pos['start']+random.choice(indexes)+2
-                    positions.drop(pos_idx, axis=0, inplace=True)
-                    break
-        nMut = case_muts['chrom'].isna().sum()
-    
-    case_muts = case_muts.astype({"pos":int})
-    return(case_muts)
-
-def simulate_mut_vafs(tumor, rank, n) -> list: 
-
-    """
-    A function to simulate the VAF of each mutation
-    """
-    
-    prop_vaf_file:pd.DataFrame = pd.read_csv(f"/oncoGAN/trained_models/vaf_annotation_by_study.tsv", sep='\t')
-    prop_vaf_file = prop_vaf_file.loc[prop_vaf_file["study"]==tumor, ['vaf_range', rank]]
-    mut_vafs:list = random.choices(list(prop_vaf_file['vaf_range']), weights=list(prop_vaf_file[rank]), k=n)
-    mut_vafs = vaf_rank2float(mut_vafs)
-
-    return(mut_vafs)
-
 def chrom2int(chrom) -> int:
 
     """
@@ -1489,7 +63,7 @@ def chrom2int(chrom) -> int:
         return 24
     else:
         return chrom
-    
+
 def chrom2str(chrom) -> str:
 
     """
@@ -1503,152 +77,18 @@ def chrom2str(chrom) -> str:
     else:
         return str(chrom)
 
-def assign_drivers(vcf, drivers_counts, drivers_mutations, drivers_vaf, drivers_tumor, fasta, idx=0, prefix=None) -> pd.DataFrame:
-
-    """
-    Include driver mutations in the vcf with passenger mutations
-    """
+def sort_by_int_chrom(chrom) -> int:
     
-    chr_prefix:bool = True if 'chr1' in fasta.keys() else False
-
-    # Select drivers from PCAWG donors
-    drivers_counts = drivers_counts[drivers_counts != 0]
-    selected_drivers:pd.DataFrame = pd.DataFrame()
-    for driver, n in drivers_counts.items():
-        if drivers_tumor == 'Lymph-MCLL':
-            drivers_mutations_df = drivers_mutations['MUT']['mutations']
-            driver_rows:pd.DataFrame = drivers_mutations_df[drivers_mutations_df['driver'] == driver]
-        elif drivers_tumor == 'Lymph-UCLL':
-            drivers_mutations_df = drivers_mutations['UNMUT']['mutations']
-            driver_rows:pd.DataFrame = drivers_mutations_df[drivers_mutations_df['driver'] == driver]
-        else:
-            drivers_mutations_df = drivers_mutations['mutations']
-            driver_rows:pd.DataFrame = drivers_mutations_df[drivers_mutations_df['driver'] == driver]
-        selected_drivers = pd.concat([selected_drivers, driver_rows.sample(n=n, replace=False)], ignore_index=True)
-
-    # Set chrom column to str
-    selected_drivers['chrom'] = selected_drivers['chrom'].astype(str)
-
-    # Fix indels ref and alt
-    for _,mut in selected_drivers.iterrows():
-        if mut['mut'] == 'DEL':
-            mut['start'] = mut['start'] - 1
-            if chr_prefix:
-                prev_base:str = fasta[f"chr{str(mut['chrom'])}"][mut['start']-1:mut['start']].seq
-            else:
-                prev_base:str = fasta[str(mut['chrom'])][mut['start']-1:mut['start']].seq
-            mut['ref'] = f"{prev_base}{mut['ref']}"
-            mut['alt'] = prev_base
-        elif mut['mut'] == 'INS':
-            if chr_prefix:
-                base:str = fasta[f"chr{mut['chrom']}"][mut['start']-1:mut['start']].seq
-            else:
-                base:str = fasta[mut['chrom']][mut['start']-1:mut['start']].seq
-            mut['ref'] = base
-            mut['alt'] = f"{base}{mut['alt']}"
-        else:
-            pass
-
-    # Reorganize columns
-    if prefix == None:
-        id_list:list = [f"sim{idx+1}"] * drivers_counts.sum()
-    else:
-        id_list:list = [prefix] * drivers_counts.sum()
-    selected_drivers['ID'] = id_list
-    selected_drivers["QUAL"] = "."
-    selected_drivers["FILTER"] = "."
-    selected_drivers['driver'] = selected_drivers['driver'].apply(lambda x: f'driver_{x}')
-    selected_drivers['INFO'] = selected_drivers.apply(lambda row: f"AF={drivers_vaf[row.name]};MS={row['driver']}", axis=1)
-    selected_drivers.rename(columns={'chrom':'#CHROM', 'start':'POS', 'ref':'REF', 'alt':'ALT'}, inplace=True)
-    selected_drivers = selected_drivers[['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO']]
-
-    # Concatenate
-    vcf = pd.concat([vcf, selected_drivers], ignore_index=True)
-
-    return(vcf)
-
-def pd2vcf(muts, drivers_counts, drivers_mutations, drivers_vaf, drivers_tumor, fasta, idx=0, prefix=None) -> pd.DataFrame:
-
     """
-    Convert the pandas DataFrame into a VCF
+    Sort a dataframe using integer chromosomes
     """
 
-    chr_prefix:bool = True if 'chr1' in fasta.keys() else False
-
-    # Create the appropiate row for each type of mutation
-    new_ref_list:list = []
-    new_alt_list:list = []
-    mut_sig_list:list = []
-    for _,mut in muts.iterrows():
-        chrom,pos,ref,alt,mut_len,mut_type,signature = str(mut['chrom']),int(mut['pos']),str(mut['r.ctx']),str(mut['a.ctx']),int(mut['len']),str(mut['mut']),str(mut['signature'])
-        if mut_type == "SNP":
-            new_ref_list.append(ref[1])
-            new_alt_list.append(alt[1])
-            mut_sig_list.append(signature)
-            continue
-        elif mut_type == "DNP":
-            new_ref_list.append("".join(ref[1:]))
-            new_alt_list.append("".join(alt[1:]))
-            mut_sig_list.append(mut_type)
-            continue
-        elif mut_type == "TNP":
-            new_ref_list.append(ref)
-            new_alt_list.append(alt)
-            mut_sig_list.append(mut_type)
-            continue
-        elif mut_type == "INS":
-            new_ref_list.append(ref[1])
-            nt = ["A", "C", "G", "T"]
-            ## Simulate a random insertion considering the simulated length
-            new_alt_list.append(ref[1]+"".join(random.choices(nt, k = mut_len)))
-            mut_sig_list.append(mut_type)
-            continue
-        elif mut_type == "DEL":
-            ## Get the region that have to be deleted from fasta
-            if chr_prefix:
-                ctx = fasta[f"chr{chrom}"][pos:pos+abs(mut_len)].seq
-            else:
-                ctx = fasta[chrom][pos:pos+abs(mut_len)].seq
-            new_ref_list.append(ref[1]+ctx)
-            new_alt_list.append(ref[1])
-            mut_sig_list.append(mut_type)
-            continue
-    
-    # Create the VCF
-    if prefix == None:
-        id_list:list = [f"sim{idx+1}"] * len(muts['chrom'])
+    if chrom == 'X':
+        return 23
+    if chrom == 'Y':
+        return 24
     else:
-        id_list:list = [prefix] * len(muts['chrom'])
-    vcf:dict = {"#CHROM":muts['chrom'],
-                "POS":muts['pos'],
-                "ID":id_list,
-                "REF":new_ref_list,
-                "ALT":new_alt_list,
-                "QUAL":".",
-                "FILTER":".",
-                "INFO":[f"AF={vaf};MS={sig}" for vaf, sig in zip(muts['vaf'], mut_sig_list)]}
-    vcf = pd.DataFrame(vcf)
-
-    # Update TNPs positions
-    tnps:pd.DataFrame = vcf[vcf["INFO"].str.contains("TNP", na=False)]
-    if len(tnps.index) > 0:
-        vcf.loc[tnps.index, 'POS'] = tnps['POS'] - 1
-
-    # Assign driver mutations to the VCF
-    if drivers_counts.sum() > 0:
-        vcf = assign_drivers(vcf, drivers_counts, drivers_mutations, drivers_vaf, drivers_tumor, fasta, idx=idx, prefix=prefix)
-
-    # Sort the VCF
-    vcf['#CHROM'] = vcf['#CHROM'].apply(chrom2int)
-    vcf = vcf.sort_values(by=['#CHROM', 'POS'])
-    vcf['#CHROM'] = vcf['#CHROM'].apply(chrom2str)
-
-    # Filter out some random and very infrequent DNP, TNP and repeated SNPs
-    vcf['keep'] = abs(vcf['POS'].diff()) > 2
-    vcf = vcf[vcf['keep'].shift(-1, fill_value=False)]
-    vcf = vcf.drop(columns=['keep']).reset_index(drop=True)
-
-    return(vcf)
+        return int(chrom)
 
 def hg19tohg38(vcf=None, cna=None, sv=None) -> pd.DataFrame:
 
@@ -1699,6 +139,746 @@ def hg19tohg38(vcf=None, cna=None, sv=None) -> pd.DataFrame:
                 sv.loc[i, 'start2'] = sv.loc[i, 'end2']-1
         return(sv)
 
+##########
+# Models #
+##########
+
+def cna_sv_models(device) -> list:
+
+    """
+    Get the CNA and SV models
+    """
+    
+    cna_sv_countModel = torch.load("/oncoGAN/trained_models/cna_sv/CNA_SV_counts.pkl", map_location=device)
+    cnaModel = torch.load("/oncoGAN/trained_models/cna_sv/CNA_model.pkl", map_location=device)
+    svModel:dict = {}
+    with open("/oncoGAN/trained_models/cna_sv/SV_positions.pkl", 'rb') as f:
+        svModel['pos'] = pickle.load(f)
+    svModel['sv'] = torch.load("/oncoGAN/trained_models/cna_sv/SV_model.pkl", map_location=device)
+
+    return(cna_sv_countModel, cnaModel, svModel)
+
+def calo_forest_generation(load_dir, y_labels):
+    
+    """
+    Generate samples using Calo-Forest models
+    """
+    
+    # Load the forest model
+    model = os.path.join(load_dir, 'forest_model.pkl')
+    with open(model, 'rb') as file:
+        model_dict = pickle.load(file)
+    model_dict['model'].set_logdir(load_dir)
+    model_dict['model'].set_solver_fn(model_dict['cfg']["solver"])
+    reverse_mapping = {v: k for k, v in model_dict['mapping'].items()}
+
+    # Prepare the number and type of samples to generate
+    y_labels_map = [reverse_mapping[x] for x in y_labels]
+    n = len(y_labels_map)
+    y = np.array(y_labels_map)
+
+    # Generate the samples
+    Xy_fake = model_dict['model'].generate(batch_size=n, label_y=y)
+
+    # Map back the labels to their original values
+    Xy_fake:pd.DataFrame = pd.DataFrame.from_records(Xy_fake, columns=model_dict['columns'])
+    pred_col = Xy_fake.columns[-1]
+    Xy_fake[pred_col] = Xy_fake[pred_col].apply(lambda x: model_dict['mapping'][x])
+
+    del model #release model memory
+    return Xy_fake
+
+def dae_reconstruction(z, dae_model: Literal['driver_profile', 'genomic_profile']) -> pd.DataFrame:
+    
+    """
+    Function to reconstruct diffusion latent spaces using the DAE model
+    """
+
+    z_serialized = pickle.dumps(z)
+    command = ['micromamba', 'run', '-n', 'dae',
+               'python3', '/oncoGAN/dae_reconstruction.py',
+               '--model', f'{dae_model}']
+    reconstructed_serialized = subprocess.run(command,
+                                              input=z_serialized,
+                                              capture_output=True)
+    reconstructed = pickle.loads(reconstructed_serialized.stdout)
+    reconstructed = pd.DataFrame(reconstructed['df'], columns=reconstructed['columns'])
+
+    return reconstructed
+
+###############
+# Simulations #
+###############
+
+def simulate_counts(tumor_f:str, nCases_f:int) -> pd.DataFrame:
+
+    """
+    Function to generate the number of each type of mutation per case
+    """
+
+    def clean_counts_apply(row):
+        tumor = row['Tumor']
+        for col in row.index[:-1]:
+            val = row[col]
+            stats = tumor_stats.get(tumor, {}).get(col)
+
+            if stats is None:
+                row[col] = round(val)
+            elif stats.get('All_Zero', False):
+                row[col] = 0
+            elif val < stats['Min'] * 0.8:
+                row[col] = 0
+            elif val > stats['Max'] * 1.3:
+                row[col] = np.nan
+            else:
+                row[col] = round(val)
+        return row
+    
+    # Prepare the list of donors to simulate
+    nCases_x5 = nCases_f * 5
+    if tumor_f == "Lymph-CLL":
+        mCases:int = round(nCases_x5*0.42)
+        uCases:int = nCases_x5 - mCases
+        cases_list = ['Lymph-MCLL']*mCases + ['Lymph-UCLL']*uCases
+    else:
+        cases_list = [tumor_f]*nCases_x5
+    
+    # Generate samples
+    counts = calo_forest_generation('/oncoGAN/trained_models/donor_characteristics', cases_list)
+
+    # Clean the output a bit (round, min and max boundaries)
+    tumor_stats = pd.read_pickle('/oncoGAN/trained_models/donor_characteristics/donor_characteristics_stats.pkl')
+    counts = counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
+    counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
+
+    #TODO - Simulate also medium and big size indels
+    counts = counts.drop(columns=['medium_ins', 'big_ins', 'medium_del', 'big_del'])
+
+    return counts
+
+def simulate_sex(tumor_list_f:tuple) -> tuple:
+
+    """
+    Simulate the sex of each donor
+    """
+
+    tumor_list_f_updated:tuple = ("Lymph-CLL" if tumor in {"Lymph-MCLL", "Lymph-UCLL"} else tumor for tumor in tumor_list_f)
+    tumor_sex_df:pd.DataFrame = pd.read_csv('/oncoGAN/trained_models/xy_usage_ranks.txt', sep='\t')
+    tumor_sex_list:list = tumor_sex_df['label'].to_list()
+
+    sex_list:list = []
+    for tumor in tumor_list_f_updated:
+        tumor_sex_options:list = [t[-1] for t in tumor_sex_list if t.startswith(tumor)]
+        
+        if 'F' in tumor_sex_options and 'M' in tumor_sex_options:
+            sex:str = "M" if random.random() < 0.5 else "F"
+        elif 'F' in tumor_sex_options and 'M' not in tumor_sex_options:
+            sex:str = "F"
+        elif 'F' not in tumor_sex_options and 'M' in tumor_sex_options:
+            sex:str = "M"
+        
+        sex_list.append(sex)
+            
+    return(tuple(sex_list))
+
+def simulate_signatures(counts_f:pd.DataFrame) -> dict:
+
+    """
+    Function to simulate the mutational signatures for each donor
+    """
+    
+    def assign_indel_ref_alt_apply(context):
+        #TODO - Handle indel size >5+, using maybe the medium|big-ins|del columns
+        ref_list = []
+        alt_list = []
+        size, indel_type, base, context_length = context.split(':')
+        if int(size) == 1:
+            if base == 'C':
+                repeat_base = random.choice(['C', 'G'])
+            elif base == 'T':
+                repeat_base = random.choice(['A', 'T'])
+
+            if indel_type == 'Del':
+                ref_list.append(repeat_base*(int(context_length)+1))
+                alt_list.append(repeat_base*int(context_length))
+            elif indel_type == 'Ins':
+                ref_list.append(repeat_base*int(context_length))
+                alt_list.append(repeat_base*(int(context_length)+1))
+        elif base == "R":
+            for _ in range(5):
+                repeat_base = ''
+                for _ in range(int(size)):
+                    repeat_base +=  random.choice(['A', 'C', 'G', 'T'])
+
+                if indel_type == 'Del':
+                    ref_list.append(repeat_base*(int(context_length)+1))
+                    alt_list.append(repeat_base*int(context_length))
+                elif indel_type == 'Ins':
+                    ref_list.append(repeat_base*int(context_length))
+                    alt_list.append(repeat_base*(int(context_length)+1))
+        elif base == 'M': 
+            for _ in range(5):
+                repeat_base = ''
+                range_len = int(size) if int(size) < 5 else random.randint(5, 9)
+                context_length_updated = int(context_length) if int(context_length) < 5 else random.randint(4, range_len-1)
+                for _ in range(range_len):
+                    if len(repeat_base) == 0:
+                        repeat_base +=  random.choice(['A', 'C', 'G', 'T'])
+                    else:
+                        repeat_base +=  random.choice([nt for nt in ['A', 'C', 'G', 'T'] if nt != repeat_base[-1]])
+
+                ref1 = repeat_base+repeat_base[:context_length_updated]
+                ref2 = repeat_base[-context_length_updated:]+repeat_base
+                ref_list.append(f"{ref1}|{ref2}")
+                alt_list.append(f"NA|{repeat_base[-1]}")
+        
+        ref = ','.join(ref_list)
+        alt = ','.join(alt_list)
+        
+        return (ref, alt)
+    
+    def reverse_complement_sbs_apply(row):
+
+        if random.choice([True, False]):
+            context = str(Seq(row['contexts']).reverse_complement())
+            ref = str(Seq(row['ref']).reverse_complement())
+            alt = str(Seq(row['alt']).reverse_complement())
+            return(context, ref, alt)
+        else:
+            return(row['contexts'], row['ref'], row['alt'])
+
+    def process_mutations(mut_df, type:Literal['sbs', 'id']):
+
+        def distribute_diff_apply(group:pd.DataFrame) -> pd.DataFrame:
+            total = int(group['total'].iloc[0])
+            current = group['n'].sum()
+            missing = total - current
+
+            if missing > 0:
+                idx = group['diff'].nlargest(missing).index
+                group.loc[idx, 'n'] += 1
+
+            return group
+        
+        # Normalize the context usage
+        contexts = mut_df.drop(columns=['signature', 'total'])
+        normalized_contexts = contexts.div(contexts.sum(axis=1), axis=0)
+        normalized_contexts = pd.concat([mut_df['signature'], normalized_contexts], axis=1)
+        # Pivot longer
+        mut_df_long = pd.melt(
+            normalized_contexts,
+            id_vars=['signature'],
+            var_name='contexts',
+            value_name='perc'
+        )
+        # Calculate the number of mutations for each context
+        mut_df_long['perc'] = pd.to_numeric(mut_df_long['perc'], errors='coerce')
+        mut_df_long['total'] = pd.to_numeric(mut_df_long['signature'].map(row_features), errors='coerce')
+        mut_df_long['exp'] = mut_df_long['perc'] * mut_df_long['total']
+        mut_df_long['n'] = np.floor(mut_df_long['exp']).astype(int)
+        mut_df_long['diff'] = mut_df_long['exp'] - mut_df_long['n']
+        mut_df_long = mut_df_long.groupby('signature', group_keys=False).apply(distribute_diff_apply)
+        mut_df_long = mut_df_long.drop(columns=['exp', 'diff'])
+        mut_df_long_expanded = mut_df_long.loc[mut_df_long.index.repeat(mut_df_long['n'].astype(int))].reset_index(drop=True)
+
+        if type == 'sbs':
+            # Extract context, ref and alt bases
+            mut_df_long_expanded[['pre', 'ref', 'alt', 'post']] = mut_df_long_expanded['contexts'].str.extract(r'([A-Z])\[([A-Z])>([A-Z])\]([A-Z])')
+            mut_df_long_expanded['contexts'] = mut_df_long_expanded['pre'] + mut_df_long_expanded['ref'] + mut_df_long_expanded['post']
+            mut_df_long_expanded[['contexts', 'ref', 'alt']] = mut_df_long_expanded.apply(reverse_complement_sbs_apply, axis=1, result_type='expand')
+            mut_df_processed = mut_df_long_expanded[['signature', 'contexts', 'ref', 'alt']]
+        elif type == 'id':
+            mut_df_long_expanded[['ref', 'alt']] = mut_df_long_expanded['contexts'].apply(assign_indel_ref_alt_apply).apply(pd.Series)
+            mut_df_processed = mut_df_long_expanded[['signature', 'contexts', 'ref', 'alt']]
+            
+        return mut_df_processed[['signature', 'contexts', 'ref', 'alt']]
+    
+    # Count how many donors present each signature
+    signatures2sim = (counts_f[counts_f.columns[:-1]] != 0).sum()
+
+    # Prepare the list of signatures to simulate
+    sbs_list = [feature for feature, count in signatures2sim.items() for _ in range(count*100) if feature.startswith("SBS")]
+    indel_list = [feature for feature, count in signatures2sim.items() for _ in range(count*100) if feature.startswith("ID")]
+
+    # Generate the signatures
+    sbs = calo_forest_generation('/oncoGAN/trained_models/sbs_context', sbs_list)
+    indels = calo_forest_generation('/oncoGAN/trained_models/indel_context', indel_list)
+    
+    # Assign signatures for each donor
+    signatures_dict = {}
+    for donor_id, row in counts_f.iterrows():
+        row_features = row[row.index.str.startswith(('SBS', 'ID', 'DNP', 'TNP'))] #TODO - Simulate also medium and big size indels
+        row_features = row_features[row_features != 0]
+        total = row_features.sum()
+        signatures_donor_sbs = pd.DataFrame()
+        signatures_donor_indels = pd.DataFrame()
+        donor_dnp = pd.DataFrame()
+        donor_tnp = pd.DataFrame()
+        for signature, count in row_features.items():
+            # Find the signature where the difference between 'total' and this donor's total number of mutations is minimized
+            if signature.startswith("SBS"):
+                sbs_signature = sbs[sbs['signature'] == signature]
+                idx = (sbs_signature['total'] - total).abs().idxmin()
+                selected_sbs = sbs_signature.loc[idx].to_frame().T
+                selected_sbs['total'] = count
+                signatures_donor_sbs = pd.concat([signatures_donor_sbs, selected_sbs], ignore_index=True)
+                sbs = sbs.drop(idx).reset_index(drop=True)
+            elif signature.startswith("ID"):
+                indels_signature = indels[indels['signature'] == signature]
+                idx = (indels_signature['total'] - total).abs().idxmin()
+                selected_indels = indels_signature.loc[idx].to_frame().T
+                selected_indels['total'] = count
+                signatures_donor_indels = pd.concat([signatures_donor_indels, selected_indels], ignore_index=True)
+                indels = indels.drop(idx).reset_index(drop=True)
+            elif signature.startswith('DNP'):
+                nucleotides = ['A', 'C', 'G', 'T']
+                while donor_dnp.shape[0] != count:
+                    dnp_ref = random.choice([f"{n1}{n2}" for n1, n2 in itertools.product(nucleotides, repeat=2)])
+                    n1_alt_list = [nt for nt in nucleotides if nt != dnp_ref[0]]
+                    n2_alt_list = [nt for nt in nucleotides if nt != dnp_ref[1]]
+                    dnp_alt = random.choice([f"{n1}{n2}" for n1, n2 in itertools.product(n1_alt_list, n2_alt_list)])
+                    selected_dnp = pd.DataFrame({'signature':['DNP'], 'contexts':['DNP'], 'ref':[dnp_ref], 'alt':[dnp_alt]})
+                    donor_dnp = pd.concat([donor_dnp, selected_dnp], ignore_index=True)
+            elif signature.startswith('TNP'):
+                nucleotides = ['A', 'C', 'G', 'T']
+                while donor_tnp.shape[0] != count:
+                    tnp_ref = random.choice([f"{n1}{n2}{n3}" for n1, n2, n3 in itertools.product(nucleotides, repeat=3)])
+                    n1_alt_list = [nt for nt in nucleotides if nt != tnp_ref[0]]
+                    n2_alt_list = [nt for nt in nucleotides if nt != tnp_ref[1]]
+                    n3_alt_list = [nt for nt in nucleotides if nt != tnp_ref[2]]
+                    tnp_alt = random.choice([f"{n1}{n2}{n3}" for n1, n2, n3 in itertools.product(n1_alt_list, n2_alt_list, n3_alt_list)])
+                    selected_tnp = pd.DataFrame({'signature':['TNP'], 'contexts':['TNP'], 'ref':[tnp_ref], 'alt':[tnp_alt]})
+                    donor_tnp = pd.concat([donor_tnp, selected_tnp], ignore_index=True)
+        signatures_donor_sbs = process_mutations(signatures_donor_sbs, type='sbs')
+        signatures_donor_indels = process_mutations(signatures_donor_indels, type='id')
+        signatures_dict[donor_id] = pd.concat([signatures_donor_sbs, signatures_donor_indels, donor_dnp, donor_tnp], ignore_index=True)
+
+    return signatures_dict
+
+def simulate_genomic_profile(tumor_list_f:tuple, counts_total_f:pd.Series) -> pd.DataFrame:
+
+    """
+    Function to simulate the genomic pattern profiles for each donor
+    """
+    
+    # Generate latent profile
+    latent_profiles = calo_forest_generation('/oncoGAN/trained_models/positional_pattern', tumor_list_f)
+    latent_profiles = latent_profiles.drop(columns=['Tumor'])
+
+    # Reconstruct the profile
+    raw_genomic_profiles = dae_reconstruction(latent_profiles, 'genomic_profile')
+
+    # Clean the output (normalize the row to sum 100%)
+    prop_genomic_profiles = raw_genomic_profiles.div(raw_genomic_profiles.sum(axis=1), axis=0)
+
+    # Get numbers instead of percentages
+    exp_genomic_profiles = prop_genomic_profiles.multiply(counts_total_f, axis=0)
+    floor_genomic_profiles = np.floor(exp_genomic_profiles)
+
+    # Check that the each profile sums exactly the total number of mutations
+    genomic_profiles = floor_genomic_profiles.copy().astype(int)
+    dif_genomic_profiles = exp_genomic_profiles - floor_genomic_profiles
+    for idx, total in enumerate(counts_total_f):
+        current = genomic_profiles.iloc[idx].sum()
+        missing = int(total - current)
+        if missing > 0:
+            cols = dif_genomic_profiles.iloc[idx].nlargest(missing).index
+            genomic_profiles.loc[genomic_profiles.index[idx], cols] += 1
+
+    return genomic_profiles
+
+def simulate_driver_profile(tumor_list_f:tuple) -> pd.DataFrame:
+
+    """
+    Function to simulate the driver profiles for each donor
+    """
+
+    # Generate latent profile
+    latent_profiles = calo_forest_generation('/oncoGAN/trained_models/driver_profile', tumor_list_f)
+    latent_profiles = latent_profiles.drop(columns=['Tumor'])
+
+    # Reconstruct the profile
+    driver_profiles = dae_reconstruction(latent_profiles, 'driver_profile')
+
+    # Get numbers instead of percentages
+    driver_profiles = driver_profiles.round(0).astype(int)
+
+    return driver_profiles
+
+def simulate_vaf_rank(tumor_list_f:tuple) -> tuple:
+
+    """
+    Function to simulate the VAF range for each donor
+    """
+
+    rank_file:pd.DataFrame = pd.read_csv("/oncoGAN/trained_models/donor_vaf_rank.tsv", sep='\t') 
+
+    donor_vafs:list = []
+    for tumor in tumor_list_f:
+        if tumor in ["Lymph-MCLL", "Lymph-UCLL"]:
+            tumor = "Lymph-CLL"
+        rank_file_i = rank_file.loc[rank_file["tumor"] == tumor]
+        vaf = random.choices(rank_file_i.columns[1:], weights=rank_file_i.values[0][1:],k=1)[0]
+        donor_vafs.append(vaf)
+
+    return tuple(donor_vafs)
+
+def simulate_mut_vafs(tumor_list_f:tuple, vaf_ranks_list:tuple, counts_total_f:pd.Series) -> dict: 
+
+    """
+    A function to simulate the VAF of each mutation
+    """
+    
+    def vaf_rank2float(case_mut_vafs_f:list) -> list:
+
+        """
+        Convert the VAF rank to a float value
+        """
+
+        final_vaf_list:list = []
+        for vaf in case_mut_vafs_f:
+            vaf:str = re.sub(r'[\[\)\]]', '', vaf)
+            start:float = float(vaf.split(',')[0])
+            end:float = float(vaf.split(',')[1])
+            final_vaf_list.append(round(random.uniform(start, end), 2))
+
+        return(final_vaf_list)
+
+    prop_vaf_file:pd.DataFrame = pd.read_csv(f"/oncoGAN/trained_models/mutation_vaf_rank.tsv", sep='\t')
+    mut_vafs:dict = {}
+    for idx, (tumor, vaf_rank, n) in enumerate(zip(tumor_list_f, vaf_ranks_list, counts_total_f)):
+        case_prop_vaf_file = prop_vaf_file.loc[prop_vaf_file["tumor"]==tumor, ['vaf_range', vaf_rank]]
+        case_mut_vafs:list = random.choices(list(case_prop_vaf_file['vaf_range']), weights=list(case_prop_vaf_file[vaf_rank]), k=n)
+        case_mut_vafs = vaf_rank2float(case_mut_vafs)
+        mut_vafs[idx] = tuple(case_mut_vafs)
+    
+    return(mut_vafs)
+
+########################
+# Complete simulations #
+########################
+
+def process_chunk(chunk_data, refGenome, n_attempt):
+    
+    def get_sequence(chromosomes_f:np.ndarray, positions_f:np.ndarray, fasta, window:int=5000) -> list:
+        
+        """
+        Function to get a DNA sequence around each position
+        """
+
+        # Update chrom variable
+        chrom_prefix:bool = 'chr1' in fasta.keys()
+        if chrom_prefix:
+            chromosomes_f = np.char.add("chr", chromosomes_f)
+        
+        # Define the window
+        positions_end:np.ndarray = positions_f + window
+
+        sequences:list = [fasta[c][s:e].seq for c, s, e in zip(chromosomes_f, positions_f, positions_end)]
+        return sequences
+
+    def match_pos2ctx(signatures_f:pd.DataFrame, chromosomes_f:np.ndarray, positions_f:np.ndarray, sequences_f:list) -> pd.DataFrame:
+
+        """
+        Function to assign a position to each mutation
+        """
+
+        def create_indels_pattern(ref_f:str, alt_f:str, context_f:str) -> str:
+
+            """
+            Function to manually create indel patterns. The patterns to be used are located in the ref and alt columns. However, to avoid creating more microhomology than needs to be simulated, we generate all possible contexts that break the extra microhomology
+            """
+
+            nucleotides = ['A', 'C', 'G', 'T']
+
+            # Exclude the first base from N
+            if ':M:' in context_f:
+                size, _, _, context_length = context_f.split(':')
+                ref1,ref2 = ref_f.split('|')
+                nt_options1 = [nt for nt in nucleotides if nt != ref1[int(context_length)]]
+                nt_options2 = [nt for nt in nucleotides if nt != ref2[int(size)-1]]
+                pattern1 = [f"{ref1}{nt}" for nt in nt_options1]
+                pattern2 = [f"{nt}{ref2}" for nt in nt_options2]
+                pattern = pattern1+pattern2
+            else:
+                if ref_f != "":
+                    nt_options = [nt for nt in nucleotides if nt != ref_f[0]]
+                else:
+                    nt_options = [nt for nt in nucleotides if nt != alt_f[0]]
+                # Create all combinations: N1 + ref + N2
+                pattern = [f"{n1}{ref_f}{n2}" for n1, n2 in itertools.product(nt_options, repeat=2)]
+
+            return "|".join(pattern)
+
+        def find_context_in_sequence(signature_i:str, context_i:str, ref_i:str, alt_i:str, sequence_i:str) -> Tuple[List[int], Optional[List[str]]]:
+
+            if signature_i.startswith("SBS"):
+                indexes = [m.start() for m in re.finditer(context_i, sequence_i)]
+                return (indexes, None)
+
+            elif signature_i.startswith("ID"):
+                refs = ref_i.split(",")
+                alts = alt_i.split(",")
+
+                for r, a in zip(refs, alts):
+                    pattern = create_indels_pattern(r, a, context_i)
+                    matches = [(m.start(), m.group()) for m in re.finditer(pattern, sequence_i)]
+                    if matches:
+                        return tuple(zip(*matches))
+                return ([], [])
+
+            elif signature_i in ("DNP", "TNP"):
+                indexes = [m.start() for m in re.finditer(ref_i, sequence_i)]
+                return (indexes, None)
+
+            return ([], None)
+
+        def update_mutations(mut_i, chrom_i:str, position_i, ctx_indexes_i:list, indel_patterns_i:list|None, fasta) -> Tuple[int, int, int]:
+
+            if not ctx_indexes_i:
+                return (None, None, None)
+
+            index_choice:int = random.randrange(len(ctx_indexes_i))
+
+            # Microhomology INDELs
+            if ':M:' in mut_i.contexts:
+                m_size, _, _, m_context_length = mut_i.contexts.split(':')
+                m_ref = indel_patterns_i[index_choice]
+
+                m_option = int(not (mut_i.ref.split('|')[0] in m_ref))
+
+                if m_option == 0:
+                    m_pos = position_i + ctx_indexes_i[index_choice]
+                    m_prev_base = fasta[chrom_i][m_pos-1:m_pos].seq
+                    ref = m_prev_base + m_ref[:int(m_size)]
+                    alt = m_prev_base
+                else:
+                    m_pos = position_i + ctx_indexes_i[index_choice] + int(m_context_length) + 1
+                    ref = m_ref[-(int(m_size)+1):]
+                    alt = ref[0]
+
+            # INDELs
+            elif mut_i.signature.startswith('ID'):
+                m_pos = position_i + ctx_indexes_i[index_choice] + 1
+                ref = indel_patterns_i[index_choice][:-1]
+
+                if mut_i.alt == "":
+                    alt = ref[0]
+                else:
+                    alt_list = mut_i.alt.split(',')
+                    ref_list = mut_i.ref.split(',')
+                    alt = ref[0] + alt_list[ref_list.index(ref[1:])]
+
+            # SBSs
+            elif mut_i.signature.startswith('SBS'):
+                m_pos = position_i + ctx_indexes_i[index_choice] + 2
+                ref = mut_i.ref
+                alt = mut_i.alt
+
+            # DNPs and TNPs
+            elif mut_i.signature in ('DNP', 'TNP'):
+                m_pos = position_i + ctx_indexes_i[index_choice] + 1
+                ref = mut_i.ref
+                alt = mut_i.alt
+
+            else:
+                return (None, None, None)
+
+            return (int(m_pos), ref, alt)
+        
+        ctx_indexes, indel_patterns = zip(*[find_context_in_sequence(row.signature, row.contexts, row.ref, row.alt, seq) for row, seq in zip(signatures_f.itertuples(index=False), sequences_f)])
+        updated_position, updated_ref, updated_alt = zip(*[update_mutations(row, chrom, pos, ctx_idxs, id_pat, fasta) for row, chrom, pos, ctx_idxs, id_pat in zip(signatures_f.itertuples(index=False), chromosomes_f, positions_f, ctx_indexes, indel_patterns)])
+        
+        updated_signatures = signatures_f.copy()
+        updated_signatures['chrom'] = chromosomes_f
+        updated_signatures['pos'] = updated_position
+        updated_signatures['updated_ref'] = updated_ref
+        updated_signatures['updated_alt'] = updated_alt
+        
+        return updated_signatures
+    
+    fasta = Fasta(refGenome)
+    
+    # Unpack the chunked data
+    donor_df_chunk_f, chrom_chunk_f, pos_chunk_f = chunk_data
+
+    # Extract a genomic sequence around each position
+    if n_attempt >= 5:
+        asgn_sequences_chunk:list = get_sequence(chrom_chunk_f, pos_chunk_f, fasta, window=50000) #TODO - Create a way to check chromosome boundaries to not break the code
+    else:    
+        asgn_sequences_chunk:list = get_sequence(chrom_chunk_f, pos_chunk_f, fasta)
+
+    # Match the context with the position range
+    tmp_donor_df_chunk: pd.DataFrame = match_pos2ctx(donor_df_chunk_f, chrom_chunk_f, pos_chunk_f, asgn_sequences_chunk)
+    
+    return tmp_donor_df_chunk
+    
+def select_driver_mutations(tumor_list_f:tuple, driver_profile_f:pd.DataFrame) -> dict:
+    
+    driver_database:pd.DataFrame = pd.read_csv("/oncoGAN/trained_models/driver_profile/driver_mutations_database.csv", delimiter=',')
+
+    driver_mutations:dict = {}
+    for idx, tumor in enumerate(tumor_list_f):
+        case_driver_profile:pd.Series = driver_profile_f.iloc[idx]
+        case_driver_mutations:list = []
+        for gene, n in case_driver_profile.items():
+            if n <= 0:
+                continue
+            else:
+                driver_muts = (driver_database.query("gene_id == @gene and tumor == @tumor").sample(n=n, replace=False))
+                case_driver_mutations.append(driver_muts)
+        driver_mutations[idx] = pd.concat(case_driver_mutations, ignore_index=True)
+    
+    return driver_mutations
+
+def assign_genomic_positions(sex_f:str, signatures_f:pd.DataFrame, genomic_pattern_f:pd.Series, refGenome, cpus) -> pd.DataFrame:
+    
+    def parse_range_map(genomic_interval:str) -> pd.MultiIndex:
+        left, right = genomic_interval.strip("[]()").split(",")
+        return int(float(left)), int(float(right))
+    
+    def assign_chromosome(positions_f:np.ndarray) -> tuple:
+        chromosome_decode:np.array  = np.array(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','X','Y'])
+        position_decode:np.array  = np.array([0,249250621,492449994,690472424,881626700,1062541960,1233657027,1392795690,1539159712,1680373143,1815907890,1950914406,2084766301,2199936179,2307285719,2409817111,2500171864,2581367074,2659444322,2718573305,2781598825,2829728720,2881033286,3036303846])
+        
+        position_encode:np.array  = np.digitize(positions_f, position_decode, right=True)
+        
+        map_positions:np.ndarray = positions_f - np.take(position_decode, position_encode-1)
+        map_chromosomes:np.ndarray = np.take(chromosome_decode, position_encode-1)
+        
+        return (map_chromosomes.astype(str), map_positions.astype(int))
+    
+    # Randomize the mutational signatures input
+    signatures_f = signatures_f.sample(frac=1).reset_index(drop=True)
+
+    #TODO - Check sexual chrom usage
+    # Initialize the output dataframe
+    donor_df = signatures_f.copy()
+    donor_df["chrom"] = None
+    donor_df["pos"] = None
+    donor_df["updated_ref"] = None
+    donor_df["updated_alt"] = None
+
+    # Define a genomic position for each mutation
+    rng = np.random.default_rng()
+    position_ranges:np.array = np.array(genomic_pattern_f.index.map(parse_range_map).tolist())
+    position_ranges_expanded = np.repeat(position_ranges, genomic_pattern_f.values, axis=0)
+
+    while_round = 0
+    n_missing = donor_df.shape[0]
+    while n_missing > 0 and while_round < 15:
+        mask = donor_df["updated_ref"].isna()
+        missing_indices = donor_df[mask].index
+
+        # Sample positions only for missing rows
+        positions:np.ndarray = np.concatenate([rng.integers(low=lo, high=hi, size=1) for lo, hi in position_ranges_expanded[mask]])
+        asgn_chromosomes, asgn_positions = assign_chromosome(positions)
+        
+        # Prepare multiprocessing
+        masked_donor_df = donor_df.loc[mask]
+        if masked_donor_df.shape[0] >= cpus:
+            donor_df_chunks = np.array_split(masked_donor_df, cpus)
+            chrom_chunks = np.array_split(asgn_chromosomes, cpus)
+            pos_chunks = np.array_split(asgn_positions, cpus)
+
+            # Create the list of arguments for the worker function
+            chunked_args = list(zip(donor_df_chunks, chrom_chunks, pos_chunks))
+            pool_args = [(arg, refGenome, while_round) for arg in chunked_args]
+
+            # Multiprocessing
+            with Pool(cpus) as pool:
+                results = pool.starmap(process_chunk, pool_args)
+            tmp_donor_df = pd.concat(results)
+        else:
+            tmp_donor_df = process_chunk((masked_donor_df, asgn_chromosomes, asgn_positions), refGenome, while_round)
+
+        tmp_donor_df = tmp_donor_df.reindex(missing_indices)
+
+        # Update only missing rows in the original DataFrame
+        donor_df.loc[mask, tmp_donor_df.columns] = tmp_donor_df.values
+        
+        n_missing = donor_df["updated_ref"].isna().sum()
+        while_round += 1
+
+    donor_df = donor_df.dropna()
+    donor_df['pos'] = donor_df['pos'].astype(int)
+    return donor_df
+
+def pd2vcf(muts_f, driver_muts_f, vafs_f, idx=0, prefix=None) -> pd.DataFrame:
+
+    """
+    Convert the pandas DataFrames into a VCF
+    """
+    def create_info_field(signatures_list_f:pd.DataFrame, driver_genes_f:pd.Series, vafs_f:tuple) -> list:
+        info:list = []
+        for row in signatures_list_f.itertuples():
+            tmp_info = f"AF={vafs_f[row.Index]};MS={row.signature}"
+
+            if 'SBS' in row.signature:
+                tmp_info = f"{tmp_info};SBSCTX={row.contexts}"
+            elif 'ID' in row.signature:
+                tmp_info = f"{tmp_info};IDCTX={row.contexts}"
+
+            if len(row.updated_ref) != 1 and len(row.updated_alt) != 1 and 'Del:M' not in row.contexts:
+                tmp_info = f"{tmp_info};HPR={row.updated_ref[1:]}"
+            elif 'Del:M' in row.contexts:
+                tmp_info = f"{tmp_info};MHR={row.updated_ref[1:]}"
+
+            info.append(tmp_info)
+        
+        for idx, driver in driver_genes_f.items():
+            info.append(f"AF={vafs_f[signatures_list_f.shape[0]+idx]};MS=driver_{driver}")
+
+        return info
+
+    def update_ref_alt_indels_apply(row) -> tuple[str, str]:
+        indel_size = len(row['ALT']) - len(row['REF'])
+        if (len(row['REF']) != 1 and len(row['ALT']) != 1) and indel_size != 0:
+            if indel_size > 0: #INS
+                ref = row['REF'][0]
+                alt = row['ALT'][:indel_size+1]
+            else: #DEL
+                ref = row['REF'][:abs(indel_size)+1]
+                alt = row['ALT'][0]
+            return (ref, alt)
+        else:
+            return (row['REF'], row['ALT'])
+
+    n_muts = muts_f.shape[0] + driver_muts_f.shape[0]
+    vcf = pd.DataFrame({
+        '#CHROM': muts_f['chrom'].tolist() + driver_muts_f['chrom'].tolist(),
+        'POS': muts_f['pos'].tolist() + driver_muts_f['start'].tolist(),
+        'ID': [f"sim{idx+1}"] * n_muts if prefix == None else [prefix] * n_muts,
+        'REF': muts_f['updated_ref'].tolist() + driver_muts_f['ref'].tolist(),
+        'ALT': muts_f['updated_alt'].tolist() + driver_muts_f['alt'].tolist(),
+        'QUAL' : '.',
+        'FILTER': '.',
+        'INFO': create_info_field(muts_f, driver_muts_f['gene_name'], vafs_f[:n_muts])
+    })
+
+    # Update REF and ALT fields
+    vcf[['REF', 'ALT']] = vcf.apply(update_ref_alt_indels_apply, axis=1, result_type="expand")
+
+    # Sort the VCF
+    vcf = vcf.sort_values(by=['#CHROM', 'POS'], key=lambda col: col.map(sort_by_int_chrom)).reset_index(drop=True)
+
+    # Filter out some random and very infrequent DNP, TNP and repeated SNPs
+    vcf['keep'] = abs(vcf['POS'].diff()) > 2
+    vcf = vcf[vcf['keep'].shift(-1, fill_value=False)]
+    vcf = vcf.drop(columns=['keep']).reset_index(drop=True)
+
+    return(vcf)
+
+
+
+
+
+
+
+############
+# CNA & SV #
+############
+
 def select_cna_sv_counts(cna_sv_countModel, nCases, tumor, counts) -> pd.DataFrame:
 
     """
@@ -1745,19 +925,6 @@ def select_cnas(cnas_df, nCNAs, lenCNA, iterations=100000) -> list:
             break
     
     return(best_subset, int(np.sum(best_subset['len'])))
-
-def sort_by_int_chrom(chrom) -> pd.DataFrame:
-    
-    """
-    Sort a dataframe using integer chromosomes
-    """
-
-    if chrom == 'X':
-        return 23
-    if chrom == 'Y':
-        return 24
-    else:
-        return int(chrom)
 
 def rescue_missing_chroms(cnas_df, gender, keys, chrom_size_dict) -> pd.DataFrame:
 
@@ -3064,14 +2231,13 @@ def cli():
 
 @click.command(name="availTumors")
 def availTumors():
-    
+
     """
     List of available tumors to simulate
     """
-
-    tumors:list = [["Breast-AdenoCa", "CNS-PiloAstro", "Eso-AdenoCa", "Kidney-RCC", "Liver-HCC", "Lymph-CLL", "Panc-Endocrine", "Prost-AdenoCA"]]
-    tumors:str = '\n'.join(['\t\t'.join(x) for x in tumors])
-    click.echo(f"\nThis is the list of available tumor types that can be simulated using oncoGAN:\n\n{tumors}\n")
+    
+    default_tumors:str = '\n'.join(['\t\t'.join(x) for x in default_tumors])
+    click.echo(f"\nThis is the list of available tumor types that can be simulated using oncoGAN:\n\n{default_tumors}\n")
 
 @click.command(name="vcfGANerator")
 @click.option("-@", "--cpus",
@@ -3080,7 +2246,7 @@ def availTumors():
               show_default=True,
               help="Number of CPUs to use")
 @click.option("--tumor",
-              type=click.Choice(["Breast-AdenoCa", "CNS-PiloAstro", "Eso-AdenoCa", "Kidney-RCC", "Liver-HCC", "Lymph-CLL", "Panc-Endocrine", "Prost-AdenoCA"]),
+              type=click.Choice(default_tumors),
               metavar="TEXT",
               show_choices=False,
               required = True,
@@ -3143,70 +2309,61 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
         os.makedirs(outDir)
 
     # Torch options
-    device:str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device:str = torch.device("cpu")
 
     # Load models
-    countModel, mutModel, posModel, driversModel, countCorr, countEx = tumor_models(tumor, device)
-    cna_sv_countModel, cnaModel, svModel = cna_sv_models(device)
+    # cna_sv_countModel, cnaModel, svModel = cna_sv_models(device)
 
-    # Load reference genome
-    fasta = Fasta(refGenome)
+    #TODO - Add an option here to load a template to simulate specific cases
+    
+    # Simulate counts for each type of mutation
+    counts:pd.DataFrame = simulate_counts(tumor, nCases)
+    counts_tumor_tag:tuple = tuple(counts.pop('Tumor').to_list())
+    counts_total:pd.Series = counts.sum(axis=1)
+    
+    # Simulate sex
+    sex:tuple = simulate_sex(counts_tumor_tag)
+    
+    if simulateMuts:
+        # Simulate mutational signatures (SBS and ID)
+        signatures:dict = simulate_signatures(counts)
+        
+        # Simulate genomic pattern profiles
+        genomic_patterns:pd.DataFrame = simulate_genomic_profile(counts_tumor_tag, counts_total)
 
-    # Generate the counts for each type of mutation for each case
-    counts:pd.DataFrame = simulate_counts(tumor, countModel, nCases, countCorr, countEx)
-
-    # Annotate VAF rank to each donor
-    donors_vafRank:list = simulate_vaf_rank(tumor, nCases)
-
-    # Generate CNA and SV counts for each case
-    cna_sv_counts:pd.DataFrame = select_cna_sv_counts(cna_sv_countModel, nCases, tumor, counts)
+        # Simulate driver profiles #TODO - Add a database to assign N number of driver mutations per driver event
+        driver_profiles:pd.DataFrame = simulate_driver_profile(counts_tumor_tag)
+        driver_mutations:dict = select_driver_mutations(counts_tumor_tag, driver_profiles)
+        
+        # Simulate donor and mutations VAFs
+        donor_vaf_ranks:tuple = simulate_vaf_rank(counts_tumor_tag)
+        counts_drivers_total:pd.Series = counts_total + driver_profiles.sum(axis=1)
+        mut_vafs:dict = simulate_mut_vafs(counts_tumor_tag, donor_vaf_ranks, counts_drivers_total)
+    
+    # if simulateCNA_SV:
+        # Simulate CNA and SV counts
+        # cna_sv_counts:pd.DataFrame = select_cna_sv_counts(cna_sv_countModel, nCases, tumor, counts)
 
     # Simulate one donor at a time
-    muts:pd.DataFrame = pd.DataFrame()
-    for idx in tqdm(range(nCases), desc = "Donors"):
-        output:str = out_path(outDir, tumor=tumor, prefix=prefix, n=idx+1)
+    for idx, case_tumor in tqdm(enumerate(counts_tumor_tag), desc = "Donors"):
+        output:str = out_path(outDir, tumor=case_tumor, prefix=prefix, n=idx+1)
         
-        # Focus in one case
         case_counts:pd.Series = counts.iloc[idx]
-        nMut:int = int(case_counts.sum())
-        case_rank:str = donors_vafRank[idx]
-        case_cna_sv:pd.Series = cna_sv_counts.iloc[idx]
-
-        # Detect specific tumor type in case we are simulating Lymph-CLL
-        if tumor == 'Lymph-CLL':
-            drivers_tumor:str = 'Lymph-MCLL' if case_counts['SBS9'] > 0 else 'Lymph-UCLL'
-        else:
-            drivers_tumor:str = tumor
-
-        # Gender selection
-        gender:str = gender_selection(tumor)
-
+        case_counts_total:int = counts_total.iloc[idx]
+        case_counts_drivers_total:int = counts_drivers_total.iloc[idx]
+        case_sex:str = sex[idx]
+        
         if simulateMuts:
-            # Simulate driver mutations to each donor
-            case_drivers:pd.Series = simulate_drivers(drivers_tumor, driversModel)
-
-            # Generate the mutations
-            muts, case_muts = simulate_mutations(mutModel, muts, nMut, case_counts, drivers_tumor)
-            
-            # Select the mutations corresponding for this case
-            muts, case_muts = select_case_mutations(muts, case_counts)
-
-            # Reduce muts size over rounds
-            if muts.shape[0] > 1e7:
-                muts = pd.DataFrame()
-            else:
-                muts = muts.sample(frac=0.5).reset_index(drop=True)
+            case_signatures:pd.DataFrame = signatures[idx]
+            case_genomic_pattern:pd.Series = genomic_patterns.iloc[idx]
+            case_driver_mutations:pd.Series = driver_mutations[idx]
+            case_mut_vafs:tuple = mut_vafs[idx] * (1-nit)
 
             # Generate the chromosome and position of the mutations
-            case_muts = assign_position(tumor, case_counts, case_muts, posModel, nMut, fasta, gender, cpus)
+            case_genomic_positions = assign_genomic_positions(case_sex, case_signatures, case_genomic_pattern, refGenome, cpus)
 
-            # Generate and assign the VAF to the mutations
-            mut_vafs:list = simulate_mut_vafs(tumor, case_rank, nMut)
-            case_muts['vaf'] = mut_vafs
-            drivers_vafs:list = simulate_mut_vafs(tumor, case_rank, case_drivers.sum())
-
-            # Create the VCF output
-            vcf:pd.DataFrame = pd2vcf(case_muts, case_drivers, driversModel, drivers_vafs, drivers_tumor, fasta, idx=idx)
+            # Create the VCF output 
+            vcf:pd.DataFrame = pd2vcf(case_genomic_positions, case_driver_mutations, case_mut_vafs, idx=idx)
 
             # Write the VCF
             if not simulateCNA_SV:
@@ -3219,273 +2376,57 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
                     out.write(f"##source=OncoGAN-v{VERSION}\n")
                     out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
                     out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
-                    out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), DEL (deletion), INS (insertion), driver* (driver mutation sampled from real donors)">\n')
+                    out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), ID (indel signature), driver_* (driver mutation sampled from real donors)">\n')
+                    out.write('##INFO=<ID=SBSCTX,Number=A,Type=String,Description="SBS96 context">\n')
+                    out.write('##INFO=<ID=IDCTX,Number=A,Type=String,Description="Indel context">\n')
+                    out.write('##INFO=<ID=HPR,Number=A,Type=String,Description="Homopolymer reference">\n')
+                    out.write('##INFO=<ID=MHR,Number=A,Type=String,Description="Microhomology reference">\n')
                 vcf.to_csv(output, sep="\t", index=False, mode="a")
 
-        if simulateCNA_SV:
-            # Simulate CNAs
-            case_cna:pd.DataFrame = simulate_cnas(case_cna_sv['cna'], case_cna_sv['len'], tumor, cnaModel, gender, refGenome, idx=idx+1)
+        # if simulateCNA_SV:
+        #    case_cna_sv:pd.Series = cna_sv_counts.iloc[idx]
+        #     # Simulate CNAs
+        #     case_cna:pd.DataFrame = simulate_cnas(case_cna_sv['cna'], case_cna_sv['len'], tumor, cnaModel, gender, refGenome, idx=idx+1)
 
-            # Simulate SVs
-            case_sv:pd.DataFrame = simulate_sv(case_cna, case_cna_sv.loc['DEL':'t2tINV'], tumor, svModel, gender, idx=idx+1)
+        #     # Simulate SVs
+        #     case_sv:pd.DataFrame = simulate_sv(case_cna, case_cna_sv.loc['DEL':'t2tINV'], tumor, svModel, gender, idx=idx+1)
 
-            # Sexual chrom must have only one allele when sex is male
-            if gender == "M":
-                case_cna, case_sv = fix_sexual_chrom_cna_sv(case_cna, case_sv)
+        #     # Sexual chrom must have only one allele when sex is male
+        #     if gender == "M":
+        #         case_cna, case_sv = fix_sexual_chrom_cna_sv(case_cna, case_sv)
 
-            # Update mutation VAFs according to CNAs
-            if simulateMuts:
-                vcf, events_order = update_vaf(vcf, case_cna, case_sv, gender, nit)
-                case_sv = update_sv(case_sv, events_order)
+        #     # Update mutation VAFs according to CNAs
+        #     if simulateMuts:
+        #         vcf, events_order = update_vaf(vcf, case_cna, case_sv, gender, nit)
+        #         case_sv = update_sv(case_sv, events_order)
 
-                ## Convert from hg19 to hg38
-                if hg38:
-                    vcf = hg19tohg38(vcf=vcf)
-                with open(output, "w+") as out:
-                    out.write("##fileformat=VCFv4.2\n")
-                    out.write(f"##fileDate={date.today().strftime('%Y%m%d')}\n")
-                    out.write(f"##source=OncoGAN-v{VERSION}\n")
-                    out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
-                    out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
-                    out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), DEL (deletion), INS (insertion), driver* (driver mutation sampled from real donors)">\n')
-                    out.write('##INFO=<ID=TA,Number=A,Type=Integer,Description="Total number of alleles in which the mutation can appear">\n')
-                    out.write('##INFO=<ID=AL,Number=A,Type=String,Description="Alleles in which the mutation appears">\n')
-                    out.write('##INFO=<ID=CN,Number=A,Type=String,Description="Copy Number ID in which the mutation is located">\n')
-                vcf.to_csv(output, sep="\t", index=False, mode="a")
-                events_order.to_csv(output.replace(".vcf", "_events_order.tsv"), sep="\t", index=False, mode="w")
+        #         ## Convert from hg19 to hg38
+        #         if hg38:
+        #             vcf = hg19tohg38(vcf=vcf)
+        #         with open(output, "w+") as out:
+        #             out.write("##fileformat=VCFv4.2\n")
+        #             out.write(f"##fileDate={date.today().strftime('%Y%m%d')}\n")
+        #             out.write(f"##source=OncoGAN-v{VERSION}\n")
+        #             out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
+        #             out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
+        #             out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), DEL (deletion), INS (insertion), driver* (driver mutation sampled from real donors)">\n')
+        #             out.write('##INFO=<ID=TA,Number=A,Type=Integer,Description="Total number of alleles in which the mutation can appear">\n')
+        #             out.write('##INFO=<ID=AL,Number=A,Type=String,Description="Alleles in which the mutation appears">\n')
+        #             out.write('##INFO=<ID=CN,Number=A,Type=String,Description="Copy Number ID in which the mutation is located">\n')
+        #         vcf.to_csv(output, sep="\t", index=False, mode="a")
+        #         events_order.to_csv(output.replace(".vcf", "_events_order.tsv"), sep="\t", index=False, mode="w")
 
-            # Plots
-            if savePlots:
-                plot_cnas(case_cna, case_sv, tumor, output.replace(".vcf", "_cna.png"), idx=idx+1) 
+        #     # Plots
+        #     if savePlots:
+        #         plot_cnas(case_cna, case_sv, tumor, output.replace(".vcf", "_cna.png"), idx=idx+1) 
             
-            # Convert from hg19 to hg38
-            if hg38:
-                case_cna = hg19tohg38(cna=case_cna)
-                case_sv = hg19tohg38(sv=case_sv)
+        #     # Convert from hg19 to hg38
+        #     if hg38:
+        #         case_cna = hg19tohg38(cna=case_cna)
+        #         case_sv = hg19tohg38(sv=case_sv)
 
-            # Save simulations
-            case_cna['major_cn'] = case_cna['major_cn'].astype('Int64')
-            case_cna['minor_cn'] = case_cna['minor_cn'].astype('Int64')
-            case_cna.to_csv(output.replace(".vcf", "_cna.tsv"), sep ='\t', index=False)
-            case_sv.to_csv(output.replace(".vcf", "_sv.tsv"), sep ='\t', index=False)
-
-@click.command(name="vcfGANerator-custom")
-@click.option("-@", "--cpus",
-              type=click.INT,
-              default=1,
-              show_default=True,
-              help="Number of CPUs to use")
-@click.option("--template",
-              type=click.Path(exists=True, file_okay=True),
-              required = True,
-              help="File in CSV format with the number of each type of mutation to simulate for each donor (template available on GitHub)")
-@click.option("-r", "--refGenome", "refGenome",
-              type=click.Path(exists=True, file_okay=True),
-              required=True,
-              help="hg19 reference genome in fasta format")
-@click.option("--outDir", "outDir",
-              type=click.Path(exists=False, file_okay=False),
-              default=os.getcwd(),
-              show_default=False,
-              help="Directory where save the simulations. Default is the current directory")
-@click.option("--hg38", "hg38",
-              is_flag=True,
-              required=False,
-              help="Transform the mutations to hg38")
-@click.option("--CNA-SV/--no-CNA-SV", "simulateCNA_SV",
-              is_flag=True,
-              required=False,
-              default=True,
-              show_default=True,
-              help="Simulate CNA and SV events")
-@click.option("--plots/--no-plots", "savePlots",
-              is_flag=True,
-              required=False,
-              default=True,
-              show_default=True,
-              help="Save plots")
-@click.version_option(version=VERSION,
-                      package_name="OncoGAN",
-                      prog_name="OncoGAN")
-def oncoGAN_custom(cpus, template, refGenome, outDir, hg38, simulateCNA_SV, savePlots):
-
-    """
-    Command to simulate mutations (VCF), CNAs and SVs for personalized tumors using a GAN model
-    """
-
-    # Load the template file
-    template_df:pd.DataFrame = pd.read_csv(template)
-
-    # Check if all the requested tumor types exist
-    avail_tumors:list = ["Breast-AdenoCa", "CNS-PiloAstro", "Eso-AdenoCa", "Kidney-RCC", "Liver-HCC", "Lymph-CLL", "Panc-Endocrine", "Prost-AdenoCA", "-"]
-    missing_tumors = template_df[~template_df['cna_sv_profile'].isin(avail_tumors)]['cna_sv_profile'].unique()
-    if len(missing_tumors) > 0:
-        print(f"Warning: The following tumors are not available: {missing_tumors}")
-        sys.exit(1)
-    
-    # Create the output directory if it doesn't exist
-    if not os.path.exists(outDir):
-        os.makedirs(outDir)
-
-    # Torch options
-    device:str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    
-    # Load reference genome
-    fasta = Fasta(refGenome)
-
-    # Load CNA and SV models
-    cna_sv_countModel, cnaModel, svModel = cna_sv_models(device)
-
-    # Simulate one donor at a time
-    muts:pd.DataFrame = pd.DataFrame()
-    for _,row in tqdm(template_df.iterrows(), desc = "Donors", total=len(template_df)):
-        # Donor ID
-        prefix:str = row['id']
-        output:str = out_path(outDir, tumor=None, prefix=prefix, custom=True)
-
-        # CNV-SV tumor profile
-        cna_sv_tumor:str = row['cna_sv_profile']
-        general_tumor:str = cna_sv_tumor if cna_sv_tumor != '-' else random.choice(sig2tum['SBS1'])
-        case_simulateCNA_SV:bool = simulateCNA_SV if cna_sv_tumor != '-' else False
-
-        # Normal in Tumor contamination
-        nit:float = float(row['NinT'])
-
-        # Create the custom donor dataframe
-        row = row.drop(['id', 'cna_sv_profile', 'NinT'])
-        row = row[row != 0]
-        df_case_counts:pd.DataFrame = row.reset_index()
-        df_case_counts.columns = ['mut', 'nMut']
-        df_case_counts['tumor_type'] = df_case_counts['mut'].apply(lambda x: random.choice(sig2tum[x]) if x in sig2tum else None)
-        df_case_counts = df_case_counts.groupby('tumor_type')
-
-        # Gender selection
-        gender:str = gender_selection(general_tumor)
-
-        # Annotate VAFs
-        donors_vafRank:list = simulate_vaf_rank(general_tumor, 1)
-        case_rank:str = donors_vafRank[0]
-        mut_vafs:list = simulate_mut_vafs(general_tumor, case_rank, int(row.sum()))
-        
-        # Donor drivers
-        driversModel = tumor_models(general_tumor, device, drivers_only=True)
-        if general_tumor == 'Lymph-CLL':
-            drivers_tumor:str = 'Lymph-MCLL' if 'SBS9' in row.index else 'Lymph-UCLL'
-        else:
-            drivers_tumor:str = general_tumor
-        case_drivers:pd.Series = simulate_drivers(drivers_tumor, driversModel)
-        drivers_vafs:list = simulate_mut_vafs(general_tumor, case_rank, case_drivers.sum())
-
-        # Simulate a mutation type at a time
-        complete_case_muts = pd.DataFrame()
-        for tumor, subset in df_case_counts:
-            case_counts:pd.Series = subset.set_index("mut")["nMut"].rename_axis(None)
-            nMut:int = int(case_counts.sum())
-            
-            # Load models
-            countModel, mutModel, posModel, countCorr, countEx = tumor_models(tumor, device, no_drivers=True)
-            if tumor == 'Lymph-CLL':
-                tumor2:str = 'Lymph-MCLL' if 'SBS9' in case_counts.index else 'Lymph-UCLL'
-            else:
-                tumor2:str = tumor
-
-            # Generate the mutations
-            muts, case_muts = simulate_mutations(mutModel, muts, nMut, case_counts, tumor2)
-            
-            # Select the mutations corresponding for this case
-            muts, case_muts = select_case_mutations(muts, case_counts)
-
-            # Reduce muts size over rounds
-            if muts.shape[0] > 1e7:
-                muts = pd.DataFrame()
-            else:
-                muts = muts.sample(frac=0.5).reset_index(drop=True)
-
-            # Generate the chromosome and position of the mutations
-            case_muts = assign_position(tumor, case_counts, case_muts, posModel, nMut, fasta, gender, cpus)
-
-            # Concatenate the simulations
-            complete_case_muts = pd.concat([complete_case_muts,case_muts])
-
-        # Assign the VAF to the mutations
-        complete_case_muts['vaf'] = mut_vafs
-
-        # Create the VCF output
-        vcf:pd.DataFrame = pd2vcf(complete_case_muts, case_drivers, driversModel, drivers_vafs, drivers_tumor, fasta, prefix=prefix)
-
-        # Write the VCF
-        if not case_simulateCNA_SV:
-            ## Convert from hg19 to hg38
-            if hg38:
-                vcf = hg19tohg38(vcf=vcf)
-            with open(output, "w+") as out:
-                out.write("##fileformat=VCFv4.2\n")
-                out.write(f"##fileDate={date.today().strftime('%Y%m%d')}\n")
-                out.write(f"##source=OncoGAN-v{VERSION}\n")
-                out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
-                out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
-                out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), DEL (deletion), INS (insertion), driver* (driver mutation sampled from real donors)">\n')
-            vcf.to_csv(output, sep="\t", index=False, mode="a")
-
-        if case_simulateCNA_SV:
-            # Load models
-            countModel, countCorr, countEx = tumor_models(cna_sv_tumor, device, counts_only=True)
-
-            # Generate the total number of counts to use as template for a specific case
-            counts:pd.DataFrame = simulate_counts(cna_sv_tumor, countModel, 1, countCorr, countEx)
-
-            # Generate CNA and SV counts for each case
-            cna_sv_counts:pd.DataFrame = select_cna_sv_counts(cna_sv_countModel, 1, cna_sv_tumor, counts)
-            case_cna_sv:pd.Series = cna_sv_counts.iloc[0]
-            
-            # Simulate CNAs
-            case_cna:pd.DataFrame = simulate_cnas(case_cna_sv['cna'], case_cna_sv['len'], cna_sv_tumor, cnaModel, gender, refGenome, prefix=prefix)
-
-            # Simulate SVs
-            case_sv:pd.DataFrame = simulate_sv(case_cna, case_cna_sv.loc['DEL':'t2tINV'], cna_sv_tumor, svModel, gender, prefix=prefix)
-
-            # Sexual chrom must have only one allele when sex is male
-            if gender == "M":
-                case_cna, case_sv = fix_sexual_chrom_cna_sv(case_cna, case_sv)
-            
-            # Update mutation VAFs according to CNAs
-            vcf, events_order = update_vaf(vcf, case_cna, case_sv, gender, nit)
-            case_sv = update_sv(case_sv, events_order)
-
-            ## Convert from hg19 to hg38
-            if hg38:
-                vcf = hg19tohg38(vcf=vcf)
-            with open(output, "w+") as out:
-                out.write("##fileformat=VCFv4.2\n")
-                out.write(f"##fileDate={date.today().strftime('%Y%m%d')}\n")
-                out.write(f"##source=OncoGAN-v{VERSION}\n")
-                out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
-                out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
-                out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), DEL (deletion), INS (insertion), driver* (driver mutation sampled from real donors)">\n')
-                out.write('##INFO=<ID=TA,Number=A,Type=Integer,Description="Total number of alleles in which the mutation can appear">\n')
-                out.write('##INFO=<ID=AL,Number=A,Type=String,Description="Alleles in which the mutation appears">\n')
-                out.write('##INFO=<ID=CN,Number=A,Type=String,Description="Copy Number ID in which the mutation is located">\n')
-            vcf.to_csv(output, sep="\t", index=False, mode="a")
-            events_order.to_csv(output.replace(".vcf", "_events_order.tsv"), sep="\t", index=False, mode="w")
-
-            # Plots
-            if savePlots:
-                plot_cnas(case_cna, case_sv, cna_sv_tumor, output.replace(".vcf", "_cna.png"), prefix=prefix) 
-            
-            # Convert from hg19 to hg38
-            if hg38:
-                case_cna = hg19tohg38(cna=case_cna)
-                case_sv = hg19tohg38(sv=case_sv)
-
-            # Save simulations
-            case_cna['major_cn'] = case_cna['major_cn'].astype('Int64')
-            case_cna['minor_cn'] = case_cna['minor_cn'].astype('Int64')
-            case_cna.to_csv(output.replace(".vcf", "_cna.tsv"), sep ='\t', index=False)
-            case_sv.to_csv(output.replace(".vcf", "_sv.tsv"), sep ='\t', index=False)
-
-cli.add_command(availTumors)
-cli.add_command(oncoGAN)
-cli.add_command(oncoGAN_custom)
-if __name__ == '__main__':
-    cli()
-    
+        #     # Save simulations
+        #     case_cna['major_cn'] = case_cna['major_cn'].astype('Int64')
+        #     case_cna['minor_cn'] = case_cna['minor_cn'].astype('Int64')
+        #     case_cna.to_csv(output.replace(".vcf", "_cna.tsv"), sep ='\t', index=False)
+        #     case_sv.to_csv(output.replace(".vcf", "_sv.tsv"), sep ='\t', index=False)

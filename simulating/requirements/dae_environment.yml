@@ -1,0 +1,14 @@
+name: dae
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.12=hd63d673_1_cpython
+  - click=8.3.1=pyh8f84b5b_1
+  - numpy=2.3.5=py312h33ff503_0
+  - pandas=2.3.3=py312hf79963d_1
+  - pip=25.3=pyh8b19718_0
+  - pytorch=2.9.1=cpu_mkl_py312_hd3d05ca_100
+  - pytorch-lightning=2.5.5=pyh2a12c56_0
+  - scikit-learn=1.7.2=py312h4f0b9e3_0
+  - setuptools=80.9.0=pyhff2d567_0
+  - tqdm=4.67.1=pyhd8ed1ab_1
