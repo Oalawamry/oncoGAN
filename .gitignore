@@ -2,7 +2,7 @@
 **/__pycache__
 **/.vscode
 simulating/test
-simulating/trained_models
+simulating/trained_models*
 simulating/requirements/torch-2.1.0+cpu.cxx11.abi-cp310-cp310-linux_x86_64.whl
 deeptumour/trained_models
 deeptumour/requirements/torch-1.9.1+cpu-cp38-cp38-linux_x86_64.whl
