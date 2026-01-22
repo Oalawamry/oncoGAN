@@ -11,6 +11,7 @@ import click
 import pickle
 import itertools
 import subprocess
+import warnings
 from multiprocessing import Pool
 import torch
 import random
@@ -29,6 +30,8 @@ import pyranges as pr
 VERSION = "1.0.0"
 
 default_tumors:list = ["Biliary-AdenoCA","Bladder-TCC","Bone-Leiomyo","Bone-Osteosarc","Breast-AdenoCa","Cervix-SCC","CNS-GBM","CNS-Medullo","CNS-Oligo","CNS-PiloAstro","ColoRect-AdenoCA","Eso-AdenoCa","Head-SCC","Kidney-ChRCC","Kidney-RCC","Liver-HCC","Lung-AdenoCA","Lung-SCC","Lymph-BNHL","Lymph-CLL","Myeloid-MPN","Ovary-AdenoCA","Panc-AdenoCA","Panc-Endocrine","Prost-AdenoCA","Skin-Melanoma","Stomach-AdenoCA","Thy-AdenoCA","Uterus-AdenoCA"]
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 #################
 # Miscellaneous #
