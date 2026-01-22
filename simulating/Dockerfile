@@ -26,5 +26,5 @@ ENV PATH=$PATH:/oncoGAN
 ENV MPLCONFIGDIR=/tmp
 ## Entrypoint
 WORKDIR /home
-EXPOSE 5678
-# ENTRYPOINT ["/usr/local/bin/_entrypoint.sh", "python", "/oncoGAN/launcher.py"]
+# EXPOSE 5678
+ENTRYPOINT ["/usr/local/bin/_entrypoint.sh", "python", "/oncoGAN/launcher.py"]
