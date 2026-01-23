@@ -37,6 +37,32 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 # Miscellaneous #
 #################
 
+def validate_template(template, default_tumors:list) -> pd.DataFrame:
+
+    """
+    Check that the template file provided by the user is correct
+    """
+
+    df:pd.DataFrame = pd.read_csv(template)
+
+    # Check "tumor" values exist in default_tumors
+    invalid_tumors = set(df["Tumor"]) - set(default_tumors)
+    if invalid_tumors:
+        raise ValueError(f"Invalid tumor values found: {sorted(invalid_tumors)}. Run 'availTumors' subcommand to check the list of available tumors.")
+    
+    # Check "NinT" is float between [0, 1]
+    df["NinT"] = pd.to_numeric(df["NinT"], errors="coerce").fillna(0)
+    invalid_nint = (df["NinT"] < 0) | (df["NinT"] > 1)
+    if invalid_nint.any():
+        bad_rows = df.loc[invalid_nint, ["NinT"]]
+        raise ValueError(f"'NinT' must be a float between 0 and 1. Invalid values found:\n{bad_rows}")
+
+    # Convert signature values to integers
+    cols_to_int = df.columns.difference(["ID", "Tumor", "NinT"])
+    df[cols_to_int] = (df[cols_to_int].apply(pd.to_numeric, errors="coerce").fillna(0).astype(int))
+
+    return df
+
 def out_path(outDir, tumor, prefix=None, n=0, custom=False) -> click.Path:
 
     """
@@ -2252,7 +2278,8 @@ def availTumors():
               type=click.Choice(default_tumors),
               metavar="TEXT",
               show_choices=False,
-              required = True,
+              default=None,
+              show_default=False,
               help="Tumor type to be simulated. Run 'availTumors' subcommand to check the list of available tumors that can be simulated")
 @click.option("-n", "--nCases", "nCases",
               type=click.INT,
@@ -2264,6 +2291,11 @@ def availTumors():
               default=0.0,
               show_default=True,
               help="Normal in Tumor contamination to be taken into account when adjusting VAF for CNA-SV events (e.g. 0.20 = 20%)")
+@click.option("--template", "template",
+              type=click.Path(exists=True, file_okay=True),
+              default=None,
+              show_default=False,
+              help="File in CSV format with the number of each type of mutation to simulate for each donor (template available on GitHub)")
 @click.option("-r", "--refGenome", "refGenome",
               type=click.Path(exists=True, file_okay=True),
               required=True,
@@ -2349,8 +2381,11 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
 
     # Simulate one donor at a time
     for idx, case_tumor in tqdm(enumerate(counts_tumor_tag), desc = "Donors"):
-        output:str = out_path(outDir, tumor=case_tumor, prefix=prefix, n=idx+1)
-        
+        if template is None:
+            output:str = out_path(outDir, tumor=case_tumor, prefix=prefix, n=idx+1)
+        else:
+            output:str = out_path(outDir, tumor=case_tumor, prefix=prefix_list[idx], n=idx+1)
+
         case_counts:pd.Series = counts.iloc[idx]
         case_counts_total:int = counts_total.iloc[idx]
         case_counts_drivers_total:int = counts_drivers_total.iloc[idx]
@@ -2359,8 +2394,11 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
         if simulateMuts:
             case_signatures:pd.DataFrame = signatures[idx]
             case_genomic_pattern:pd.Series = genomic_patterns.iloc[idx]
-            case_driver_mutations:pd.Series = driver_mutations[idx]
-            case_mut_vafs:tuple = mut_vafs[idx] * (1-nit)
+            case_driver_mutations:pd.Series = driver_mutations[idx].reset_index(drop=True)
+            if template is None:
+                case_mut_vafs:list = [vaf*(1-nit) for vaf in mut_vafs[idx]]
+            else:
+                case_mut_vafs:list = [vaf*(1-nit_list[idx]) for vaf in mut_vafs[idx]]
 
             # Generate the chromosome and position of the mutations
             case_genomic_positions = assign_genomic_positions(case_sex, case_signatures, case_genomic_pattern, refGenome, cpus)
