@@ -2338,7 +2338,13 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
     """
     Command to simulate mutations (VCF), CNAs and SVs for different tumor types using a GAN model
     """
-    
+
+    # Check that CLI parameters are correct
+    if tumor is None and template is None:
+        raise click.UsageError("You must provide either a tumor type using the '--tumor' option or a template using the '--template' option. Run 'availTumors' subcommand to check the list of available tumors that can be simulated.")
+    if tumor is not None and template is not None:
+        raise click.UsageError("You cannot provide both a tumor type using the '--tumor' option and a template using the '--template' option at the same time. Please choose one of the two options. Run 'availTumors' subcommand to check the list of available tumors that can be simulated.")
+
     # Create the output directory if it doesn't exist
     if not os.path.exists(outDir):
         os.makedirs(outDir)
@@ -2352,10 +2358,17 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
     #TODO - Add an option here to load a template to simulate specific cases
     
     # Simulate counts for each type of mutation
-    counts:pd.DataFrame = simulate_counts(tumor, nCases)
-    counts_tumor_tag:tuple = tuple(counts.pop('Tumor').to_list())
-    counts_total:pd.Series = counts.sum(axis=1)
-    
+    if template is None:
+        counts:pd.DataFrame = simulate_counts(tumor, nCases)
+        counts_tumor_tag:tuple = tuple(counts.pop('Tumor').to_list())
+        counts_total:pd.Series = counts.sum(axis=1)
+    else:
+        counts:pd.DataFrame = validate_template(template, default_tumors)
+        prefix_list:tuple = tuple(counts.pop('ID').to_list())
+        nit_list:tuple = tuple(counts.pop('NinT').to_list())
+        counts_tumor_tag:tuple = tuple(counts.pop('Tumor').to_list())
+        counts_total:pd.Series = counts.sum(axis=1)
+
     # Simulate sex
     sex:tuple = simulate_sex(counts_tumor_tag)
     
