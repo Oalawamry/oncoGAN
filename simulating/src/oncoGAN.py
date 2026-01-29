@@ -280,9 +280,6 @@ def simulate_counts(tumor_f:str, nCases_f:int) -> pd.DataFrame:
     counts = counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
 
-    #TODO - Simulate also medium and big size indels
-    counts = counts.drop(columns=['medium_ins', 'big_ins', 'medium_del', 'big_del'])
-
     return counts
 
 def simulate_sex(tumor_list_f:tuple) -> tuple:
@@ -317,7 +314,6 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
     """
     
     def assign_indel_ref_alt_apply(context):
-        #TODO - Handle indel size >5+, using maybe the medium|big-ins|del columns
         ref_list = []
         alt_list = []
         size, indel_type, base, context_length = context.split(':')
@@ -434,15 +430,19 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
     indels = calo_forest_generation('/oncoGAN/trained_models/indel_context', indel_list)
     
     # Assign signatures for each donor
+    nucleotides = ['A', 'C', 'G', 'T']
     signatures_dict = {}
     for donor_id, row in counts_f.iterrows():
-        row_features = row[row.index.str.startswith(('SBS', 'ID', 'DNP', 'TNP'))] #TODO - Simulate also medium and big size indels
-        row_features = row_features[row_features != 0]
+        row_features = row[row != 0]
         total = row_features.sum()
         signatures_donor_sbs = pd.DataFrame()
         signatures_donor_indels = pd.DataFrame()
         donor_dnp = pd.DataFrame()
         donor_tnp = pd.DataFrame()
+        donor_medium_ins = pd.DataFrame()
+        donor_big_ins = pd.DataFrame()
+        donor_medium_del = pd.DataFrame()
+        donor_big_del = pd.DataFrame()
         for signature, count in row_features.items():
             # Find the signature where the difference between 'total' and this donor's total number of mutations is minimized
             if signature.startswith("SBS"):
@@ -459,8 +459,7 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
                 selected_indels['total'] = count
                 signatures_donor_indels = pd.concat([signatures_donor_indels, selected_indels], ignore_index=True)
                 indels = indels.drop(idx).reset_index(drop=True)
-            elif signature.startswith('DNP'):
-                nucleotides = ['A', 'C', 'G', 'T']
+            elif signature == 'DNP':
                 while donor_dnp.shape[0] != count:
                     dnp_ref = random.choice([f"{n1}{n2}" for n1, n2 in itertools.product(nucleotides, repeat=2)])
                     n1_alt_list = [nt for nt in nucleotides if nt != dnp_ref[0]]
@@ -468,8 +467,7 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
                     dnp_alt = random.choice([f"{n1}{n2}" for n1, n2 in itertools.product(n1_alt_list, n2_alt_list)])
                     selected_dnp = pd.DataFrame({'signature':['DNP'], 'contexts':['DNP'], 'ref':[dnp_ref], 'alt':[dnp_alt]})
                     donor_dnp = pd.concat([donor_dnp, selected_dnp], ignore_index=True)
-            elif signature.startswith('TNP'):
-                nucleotides = ['A', 'C', 'G', 'T']
+            elif signature == 'TNP':
                 while donor_tnp.shape[0] != count:
                     tnp_ref = random.choice([f"{n1}{n2}{n3}" for n1, n2, n3 in itertools.product(nucleotides, repeat=3)])
                     n1_alt_list = [nt for nt in nucleotides if nt != tnp_ref[0]]
@@ -478,9 +476,34 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
                     tnp_alt = random.choice([f"{n1}{n2}{n3}" for n1, n2, n3 in itertools.product(n1_alt_list, n2_alt_list, n3_alt_list)])
                     selected_tnp = pd.DataFrame({'signature':['TNP'], 'contexts':['TNP'], 'ref':[tnp_ref], 'alt':[tnp_alt]})
                     donor_tnp = pd.concat([donor_tnp, selected_tnp], ignore_index=True)
+            elif signature == 'medium_ins':
+                while donor_medium_ins.shape[0] != count:
+                    medium_ins_ref = random.choice(nucleotides)
+                    medium_ins_alt = ''.join(random.choices(nucleotides, k=random.randint(6,10)))
+                    selected_medium_ins = pd.DataFrame({'signature':['medium_ins'], 'contexts':['medium_ins'], 'ref':[medium_ins_ref], 'alt':[medium_ins_alt]})
+                    donor_medium_ins = pd.concat([donor_medium_ins, selected_medium_ins], ignore_index=True)
+            elif signature == 'big_ins':
+                while donor_big_ins.shape[0] != count:
+                    big_ins_ref = random.choice(nucleotides)
+                    big_ins_alt = ''.join(random.choices(nucleotides, k=random.randint(11,25)))
+                    selected_big_ins = pd.DataFrame({'signature':['big_ins'], 'contexts':['big_ins'], 'ref':[big_ins_ref], 'alt':[big_ins_alt]})
+                    donor_big_ins = pd.concat([donor_big_ins, selected_big_ins], ignore_index=True)
+            elif signature == 'medium_del':
+                while donor_medium_del.shape[0] != count:
+                    medium_del_ref = random.randint(6,10)
+                    medium_del_alt = random.choice(nucleotides)
+                    selected_medium_del = pd.DataFrame({'signature':['medium_del'], 'contexts':['medium_del'], 'ref':[medium_del_ref], 'alt':[medium_del_alt]})
+                    donor_medium_del = pd.concat([donor_medium_del, selected_medium_del], ignore_index=True)
+            elif signature == 'big_del':
+                while donor_big_del.shape[0] != count:
+                    big_del_ref = random.randint(11,25)
+                    big_del_alt = random.choice(nucleotides)
+                    selected_big_del = pd.DataFrame({'signature':['big_del'], 'contexts':['big_del'], 'ref':[big_del_ref], 'alt':[big_del_alt]})
+                    donor_big_del = pd.concat([donor_big_del, selected_big_del], ignore_index=True)
+                    
         signatures_donor_sbs = process_mutations(signatures_donor_sbs, type='sbs')
         signatures_donor_indels = process_mutations(signatures_donor_indels, type='id')
-        signatures_dict[donor_id] = pd.concat([signatures_donor_sbs, signatures_donor_indels, donor_dnp, donor_tnp], ignore_index=True)
+        signatures_dict[donor_id] = pd.concat([signatures_donor_sbs, signatures_donor_indels, donor_dnp, donor_tnp, donor_medium_ins, donor_big_ins, donor_medium_del, donor_big_del], ignore_index=True)
 
     return signatures_dict
 
@@ -848,9 +871,14 @@ def process_chunk(chunk_data, refGenome, n_attempt):
                         return tuple(zip(*matches))
                 return ([], [])
 
-            elif signature_i in ("DNP", "TNP"):
+            elif signature_i in ("DNP", "TNP", "medium_ins", "big_ins"):
                 indexes = [m.start() for m in re.finditer(ref_i, sequence_i)]
                 return (indexes, None)
+
+            elif signature_i in ("medium_del", "big_del"):
+                indexes = [m.start() for m in re.finditer(alt_i, sequence_i)]
+                patterns = [sequence_i[i:i+int(ref_i)+1] for i in indexes]
+                return (indexes, patterns)
 
             return ([], None)
 
@@ -900,6 +928,18 @@ def process_chunk(chunk_data, refGenome, n_attempt):
             elif mut_i.signature in ('DNP', 'TNP'):
                 m_pos = position_i + ctx_indexes_i[index_choice] + 1
                 ref = mut_i.ref
+                alt = mut_i.alt
+            
+            # Medium and big insertions
+            elif mut_i.signature in ('medium_ins', 'big_ins'):
+                m_pos = position_i + ctx_indexes_i[index_choice] + 1
+                ref = mut_i.ref
+                alt = ref + mut_i.alt
+            
+            # Medium and big deletions
+            elif mut_i.signature in ('medium_del', 'big_del'):
+                m_pos = position_i + ctx_indexes_i[index_choice] + 1
+                ref = indel_patterns_i[index_choice]
                 alt = mut_i.alt
 
             else:
@@ -2624,7 +2664,7 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
                     out.write(f"##source=OncoGAN-v{VERSION}\n")
                     out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
                     out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
-                    out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), ID (indel signature), driver_* (driver mutation sampled from real donors)">\n')
+                    out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), ID (indel signature), driver_* (driver mutation sampled from real donors), medium_ins/del (>5 indel size <=10), big_ins/del (>10 indel size <=25)">\n')
                     out.write('##INFO=<ID=SBSCTX,Number=A,Type=String,Description="SBS96 context">\n')
                     out.write('##INFO=<ID=IDCTX,Number=A,Type=String,Description="Indel context">\n')
                     out.write('##INFO=<ID=HPR,Number=A,Type=String,Description="Homopolymer reference">\n')
