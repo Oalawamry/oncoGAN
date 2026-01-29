@@ -760,8 +760,10 @@ def simulate_mut_vafs(tumor_list_f:tuple, vaf_ranks_list:tuple, counts_total_f:p
     prop_vaf_file:pd.DataFrame = pd.read_csv(f"/oncoGAN/trained_models/mutation_vaf_rank.tsv", sep='\t')
     mut_vafs:dict = {}
     for idx, (tumor, vaf_rank, n) in enumerate(zip(tumor_list_f, vaf_ranks_list, counts_total_f)):
+        if tumor in ["Lymph-MCLL", "Lymph-UCLL"]:
+            tumor = "Lymph-CLL"
         case_prop_vaf_file = prop_vaf_file.loc[prop_vaf_file["tumor"]==tumor, ['vaf_range', vaf_rank]]
-        case_mut_vafs:list = random.choices(list(case_prop_vaf_file['vaf_range']), weights=list(case_prop_vaf_file[vaf_rank]), k=n)
+        case_mut_vafs:list = random.choices(list(case_prop_vaf_file['vaf_range']), weights=list(case_prop_vaf_file[vaf_rank]), k=int(n))
         case_mut_vafs = vaf_rank2float(case_mut_vafs)
         mut_vafs[idx] = tuple(case_mut_vafs)
     
@@ -917,7 +919,7 @@ def process_chunk(chunk_data, refGenome, n_attempt):
 
     # Extract a genomic sequence around each position
     if n_attempt >= 5:
-        asgn_sequences_chunk:list = get_sequence(chrom_chunk_f, pos_chunk_f, fasta, window=50000) #TODO - Create a way to check chromosome boundaries to not break the code
+        asgn_sequences_chunk:list = get_sequence(chrom_chunk_f, pos_chunk_f, fasta, window=50000)
     else:    
         asgn_sequences_chunk:list = get_sequence(chrom_chunk_f, pos_chunk_f, fasta)
 
@@ -938,8 +940,11 @@ def select_driver_mutations(tumor_list_f:tuple, driver_profile_f:pd.DataFrame) -
             if n <= 0:
                 continue
             else:
-                driver_muts = (driver_database.query("gene_id == @gene and tumor == @tumor").sample(n=n, replace=False))
-                case_driver_mutations.append(driver_muts)
+                driver_muts = driver_database.query("gene_id == @gene and tumor == @tumor")
+                if driver_muts.shape[0] == 0:
+                    continue
+                else:
+                    case_driver_mutations.append(driver_muts.sample(n=n, replace=False))
         driver_mutations[idx] = pd.concat(case_driver_mutations, ignore_index=True)
     
     return driver_mutations
@@ -964,7 +969,6 @@ def assign_genomic_positions(sex_f:str, signatures_f:pd.DataFrame, genomic_patte
     # Randomize the mutational signatures input
     signatures_f = signatures_f.sample(frac=1).reset_index(drop=True)
 
-    #TODO - Check sexual chrom usage
     # Initialize the output dataframe
     donor_df = signatures_f.copy()
     donor_df["chrom"] = None
@@ -1015,7 +1019,7 @@ def assign_genomic_positions(sex_f:str, signatures_f:pd.DataFrame, genomic_patte
 
     donor_df = donor_df.dropna()
     donor_df['pos'] = donor_df['pos'].astype(int)
-    return donor_df
+    return donor_df.reset_index(drop=True)
 
 def pd2vcf(muts_f, driver_muts_f, vafs_f, idx=0, prefix=None) -> pd.DataFrame:
 
@@ -1066,7 +1070,7 @@ def pd2vcf(muts_f, driver_muts_f, vafs_f, idx=0, prefix=None) -> pd.DataFrame:
         'ALT': muts_f['updated_alt'].tolist() + driver_muts_f['alt'].tolist(),
         'QUAL' : '.',
         'FILTER': '.',
-        'INFO': create_info_field(muts_f, driver_muts_f['gene_name'], vafs_f[:n_muts])
+        'INFO': create_info_field(muts_f, driver_muts_f['gene_name'], vafs_f[:n_muts+1])
     })
 
     # Update REF and ALT fields
@@ -2534,7 +2538,7 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
         os.makedirs(outDir)
 
     # Torch options
-    device:str = torch.device("cpu")
+    device:torch.device = torch.device("cpu")
 
     # Load models
     # cna_sv_countModel, cnaModel, svModel = cna_sv_models(device)
@@ -2589,7 +2593,7 @@ def oncoGAN(cpus, tumor, nCases, nit, refGenome, prefix, outDir, hg38, simulateM
         case_sex:str = sex[idx]
         
         if simulateMuts:
-            case_signatures:pd.DataFrame = signatures[idx]
+            case_signatures:pd.DataFrame = signatures[idx].reset_index(drop=True)
             case_genomic_pattern:pd.Series = genomic_patterns.iloc[idx]
             case_driver_mutations:pd.Series = driver_mutations[idx].reset_index(drop=True)
             if template is None:
