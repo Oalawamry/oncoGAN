@@ -787,7 +787,13 @@ def process_chunk(chunk_data, refGenome, n_attempt):
             chromosomes_f = np.char.add("chr", chromosomes_f)
         
         # Define the window
-        positions_end:np.ndarray = positions_f + window
+        chrom_sizes:dict = {chrom: len(fasta[chrom]) for chrom in fasta.keys()}
+        positions_end:list = []
+        for chrom, pos in zip(chromosomes_f, positions_f):
+            if pos + window > chrom_sizes[chrom]:
+                positions_end.append(chrom_sizes[chrom])
+            else:
+                positions_end.append(pos + window)
 
         sequences:list = [fasta[c][s:e].seq for c, s, e in zip(chromosomes_f, positions_f, positions_end)]
         return sequences
