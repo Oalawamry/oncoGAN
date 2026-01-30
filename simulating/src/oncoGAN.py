@@ -931,7 +931,7 @@ def process_chunk(chunk_data, refGenome, n_attempt):
                     ref = m_prev_base + m_ref[:int(m_size)]
                     alt = m_prev_base
                 else:
-                    m_pos = position_i + ctx_indexes_i[index_choice] + int(m_context_length) + 1
+                    m_pos = position_i + ctx_indexes_i[index_choice] + len(m_ref) - (int(m_size)) 
                     ref = m_ref[-(int(m_size)+1):]
                     alt = ref[0]
 
