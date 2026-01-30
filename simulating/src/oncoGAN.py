@@ -380,7 +380,7 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
             missing = total - current
 
             if missing > 0:
-                idx = group['diff'].nlargest(missing).index
+                idx = group['diff'].sample(frac=1).nlargest(missing).index
                 group.loc[idx, 'n'] += 1
 
             return group
@@ -604,7 +604,7 @@ def simulate_genomic_profile(tumor_list_f:tuple, counts_total_f:pd.Series, sex_f
                 if dif_x_mut > 0:
                     dif_x_genomic_profiles = round_genomic_profiles_f.loc[idx, X_cols] - floor_genomic_profiles_f.loc[idx, X_cols]
                     dif_x_to_half = exp_genomic_profiles_f.loc[idx, X_cols] - floor_genomic_profiles_f.loc[idx, X_cols]
-                    selected_autosomal_cols = add_autosomal_to_half.loc[add_candidate_autosomal_cols].nsmallest(abs(dif_x_mut)).index
+                    selected_autosomal_cols = add_autosomal_to_half.loc[add_candidate_autosomal_cols].sample(frac=1).nsmallest(abs(dif_x_mut)).index
                     add_candidate_autosomal_cols = add_candidate_autosomal_cols.difference(selected_autosomal_cols)
                     x_sign = -1
                     autosomal_sign = 1
@@ -613,20 +613,20 @@ def simulate_genomic_profile(tumor_list_f:tuple, counts_total_f:pd.Series, sex_f
                 else:
                     dif_x_genomic_profiles = ceil_genomic_profiles_f.loc[idx, X_cols] - round_genomic_profiles_f.loc[idx, X_cols]
                     dif_x_to_half = ceil_genomic_profiles_f.loc[idx, X_cols] - exp_genomic_profiles_f.loc[idx, X_cols]
-                    selected_autosomal_cols = rm_autosomal_to_half.loc[rm_candidate_autosomal_cols].nsmallest(abs(dif_x_mut)).index
+                    selected_autosomal_cols = rm_autosomal_to_half.loc[rm_candidate_autosomal_cols].sample(frac=1).nsmallest(abs(dif_x_mut)).index
                     rm_candidate_autosomal_cols = rm_candidate_autosomal_cols.difference(selected_autosomal_cols)
                     x_sign = 1
                     autosomal_sign = -1
 
                 candidate_x_cols = dif_x_genomic_profiles[dif_x_genomic_profiles == 1].index
-                selected_x_cols = dif_x_to_half.loc[candidate_x_cols].nsmallest(abs(dif_x_mut)).index
+                selected_x_cols = dif_x_to_half.loc[candidate_x_cols].sample(frac=1).nsmallest(abs(dif_x_mut)).index
                 profiles.loc[idx, selected_x_cols] += x_sign
 
                 n_selected_x_cols = len(selected_x_cols)
                 while n_selected_x_cols < abs(dif_x_mut):
                     remaining = abs(dif_x_mut) - n_selected_x_cols
                     exp_x_row = exp_genomic_profiles_f.loc[idx, X_cols]
-                    extra_x_cols = np.random.choice(exp_x_row[exp_x_row >= 0.3].index.difference(candidate_x_cols), size=remaining, replace=False)
+                    extra_x_cols = np.random.choice(exp_x_row[exp_x_row >= np.median(exp_x_row)].index.difference(candidate_x_cols), size=remaining, replace=False)
                     profiles.loc[idx, extra_x_cols] += x_sign
                     n_selected_x_cols += len(extra_x_cols)
                 
@@ -650,7 +650,7 @@ def simulate_genomic_profile(tumor_list_f:tuple, counts_total_f:pd.Series, sex_f
                     if dif_y_mut > 0:
                         dif_y_genomic_profiles = round_genomic_profiles_f.loc[idx, Y_cols] - floor_genomic_profiles_f.loc[idx, Y_cols]
                         dif_y_to_half = exp_genomic_profiles_f.loc[idx, Y_cols] - floor_genomic_profiles_f.loc[idx, Y_cols]
-                        selected_autosomal_cols = add_autosomal_to_half.loc[add_candidate_autosomal_cols].nsmallest(abs(dif_y_mut)).index
+                        selected_autosomal_cols = add_autosomal_to_half.loc[add_candidate_autosomal_cols].sample(frac=1).nsmallest(abs(dif_y_mut)).index
                         y_sign = -1
                         autosomal_sign = 1
 
@@ -658,25 +658,42 @@ def simulate_genomic_profile(tumor_list_f:tuple, counts_total_f:pd.Series, sex_f
                     else:
                         dif_y_genomic_profiles = ceil_genomic_profiles_f.loc[idx, Y_cols] - round_genomic_profiles_f.loc[idx, Y_cols]
                         dif_y_to_half = ceil_genomic_profiles_f.loc[idx, Y_cols] - exp_genomic_profiles_f.loc[idx, Y_cols]
-                        selected_autosomal_cols = rm_autosomal_to_half.loc[rm_candidate_autosomal_cols].nsmallest(abs(dif_y_mut)).index
+                        selected_autosomal_cols = rm_autosomal_to_half.loc[rm_candidate_autosomal_cols].sample(frac=1).nsmallest(abs(dif_y_mut)).index
                         y_sign = 1
                         autosomal_sign = -1
 
                     candidate_y_cols = dif_y_genomic_profiles[dif_y_genomic_profiles == 1].index
-                    selected_y_cols = dif_y_to_half.loc[candidate_y_cols].nsmallest(abs(dif_y_mut)).index
+                    selected_y_cols = dif_y_to_half.loc[candidate_y_cols].sample(frac=1).nsmallest(abs(dif_y_mut)).index
                     profiles.loc[idx, selected_y_cols] += y_sign
 
                     n_selected_y_cols = len(selected_y_cols)
                     while n_selected_y_cols < abs(dif_y_mut):
                         remaining = abs(dif_y_mut) - n_selected_y_cols
                         exp_y_row = exp_genomic_profiles_f.loc[idx, Y_cols]
-                        extra_y_cols = np.random.choice(exp_y_row[exp_y_row >= 0.3].index.difference(candidate_y_cols), size=remaining, replace=False)
+                        extra_y_cols = np.random.choice(exp_y_row[exp_y_row >= np.median(exp_y_row)].index.difference(candidate_y_cols), size=remaining, replace=False)
                         profiles.loc[idx, extra_y_cols] += y_sign
                         n_selected_y_cols += len(extra_y_cols)
 
                     profiles.loc[idx, selected_autosomal_cols] += autosomal_sign
 
+        profiles = profiles.apply(extra_adjustment_apply, axis=1)
         return profiles
+
+    def extra_adjustment_apply(row:pd.Series) -> pd.Series:
+
+        """
+        In very rare cases where only a very small amount of mutations are generated, there might be regions with -1 mutations.
+        This function is to fix those regions in a very simple way.
+        """
+
+        pos_to_rm:int = abs(row[row < 0].sum())
+        if pos_to_rm > 0:
+            cols = row.sample(frac=1).nlargest(pos_to_rm).index
+            row[cols] -= 1
+            row[row < 0] = 0
+            return row
+        else:
+            return row
 
     # Generate latent profile
     latent_profiles = calo_forest_generation('/oncoGAN/trained_models/positional_pattern', tumor_list_f*5)
@@ -713,7 +730,7 @@ def simulate_genomic_profile(tumor_list_f:tuple, counts_total_f:pd.Series, sex_f
         else:
             continue
         candidate_cols = dif_genomic_profiles[dif_genomic_profiles == 1].index
-        selected_cols = dif_to_half.loc[candidate_cols].nsmallest(abs(missing)).index
+        selected_cols = dif_to_half.loc[candidate_cols].sample(frac=1).nsmallest(abs(missing)).index
         genomic_profiles.loc[genomic_profiles.index[idx], selected_cols] += sign
     
     # Update sexual chromosomes usage
