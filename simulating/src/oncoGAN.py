@@ -426,8 +426,14 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
     indel_list = [feature for feature, count in signatures2sim.items() for _ in range(count*100) if feature.startswith("ID")]
 
     # Generate the signatures
-    sbs = calo_forest_generation('/oncoGAN/trained_models/sbs_context', sbs_list)
-    indels = calo_forest_generation('/oncoGAN/trained_models/indel_context', indel_list)
+    if len(sbs_list) > 0:
+        sbs = calo_forest_generation('/oncoGAN/trained_models/sbs_context', sbs_list)
+    else:
+        sbs = None
+    if len(indel_list) > 0:
+        indels = calo_forest_generation('/oncoGAN/trained_models/indel_context', indel_list)
+    else:
+        indels = None
     
     # Assign signatures for each donor
     nucleotides = ['A', 'C', 'G', 'T']
@@ -445,14 +451,14 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
         donor_big_del = pd.DataFrame()
         for signature, count in row_features.items():
             # Find the signature where the difference between 'total' and this donor's total number of mutations is minimized
-            if signature.startswith("SBS"):
+            if signature.startswith("SBS") and sbs is not None:
                 sbs_signature = sbs[sbs['signature'] == signature]
                 idx = (sbs_signature['total'] - total).abs().idxmin()
                 selected_sbs = sbs_signature.loc[idx].to_frame().T
                 selected_sbs['total'] = count
                 signatures_donor_sbs = pd.concat([signatures_donor_sbs, selected_sbs], ignore_index=True)
                 sbs = sbs.drop(idx).reset_index(drop=True)
-            elif signature.startswith("ID"):
+            elif signature.startswith("ID") and indels is not None:
                 indels_signature = indels[indels['signature'] == signature]
                 idx = (indels_signature['total'] - total).abs().idxmin()
                 selected_indels = indels_signature.loc[idx].to_frame().T
@@ -500,9 +506,15 @@ def simulate_signatures(counts_f:pd.DataFrame) -> dict:
                     big_del_alt = random.choice(nucleotides)
                     selected_big_del = pd.DataFrame({'signature':['big_del'], 'contexts':['big_del'], 'ref':[big_del_ref], 'alt':[big_del_alt]})
                     donor_big_del = pd.concat([donor_big_del, selected_big_del], ignore_index=True)
-                    
-        signatures_donor_sbs = process_mutations(signatures_donor_sbs, type='sbs')
-        signatures_donor_indels = process_mutations(signatures_donor_indels, type='id')
+        
+        if sbs is not None:
+            signatures_donor_sbs = process_mutations(signatures_donor_sbs, type='sbs')
+        else:
+            signatures_donor_sbs = pd.DataFrame()
+        if indels is not None:
+            signatures_donor_indels = process_mutations(signatures_donor_indels, type='id')
+        else:
+            signatures_donor_indels = pd.DataFrame()
         signatures_dict[donor_id] = pd.concat([signatures_donor_sbs, signatures_donor_indels, donor_dnp, donor_tnp, donor_medium_ins, donor_big_ins, donor_medium_del, donor_big_del], ignore_index=True)
 
     return signatures_dict
