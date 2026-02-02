@@ -866,12 +866,15 @@ def process_chunk(chunk_data, refGenome, n_attempt):
 
             # Exclude the first base from N
             if ':M:' in context_f:
-                size, _, _, context_length = context_f.split(':')
                 ref1,ref2 = ref_f.split('|')
-                nt_options1 = [nt for nt in nucleotides if nt != ref1[int(context_length)]]
-                nt_options2 = [nt for nt in nucleotides if nt != ref2[int(size)-1]]
-                pattern1 = [f"{ref1}{nt}" for nt in nt_options1]
-                pattern2 = [f"{nt}{ref2}" for nt in nt_options2]
+                context_length = context_f.split(':')[-1]
+                size = len(ref1)-int(context_length)
+                nt_options1_1 = [nt for nt in nucleotides if nt != ref1[-(int(context_length)+1)]]
+                nt_options1_2 = [nt for nt in nucleotides if nt != ref1[int(context_length)]]
+                nt_options2_1 = [nt for nt in nucleotides if nt != ref2[-(int(context_length)+1)]]
+                nt_options2_2 = [nt for nt in nucleotides if nt != ref2[int(context_length)]]
+                pattern1 = [f"{n1}{ref1}{n2}" for n1, n2 in itertools.product(nt_options1_1, nt_options1_2)]
+                pattern2 = [f"{n1}{ref2}{n2}" for n1, n2 in itertools.product(nt_options2_1, nt_options2_2)]
                 pattern = pattern1+pattern2
             else:
                 if ref_f != "":
@@ -880,38 +883,41 @@ def process_chunk(chunk_data, refGenome, n_attempt):
                     nt_options = [nt for nt in nucleotides if nt != alt_f[0]]
                 # Create all combinations: N1 + ref + N2
                 pattern = [f"{n1}{ref_f}{n2}" for n1, n2 in itertools.product(nt_options, repeat=2)]
+                size = None
 
-            return "|".join(pattern)
+            return ("|".join(pattern), size)
 
         def find_context_in_sequence(signature_i:str, context_i:str, ref_i:str, alt_i:str, sequence_i:str) -> Tuple[List[int], Optional[List[str]]]:
 
             if signature_i.startswith("SBS"):
                 indexes = [m.start() for m in re.finditer(context_i, sequence_i)]
-                return (indexes, None)
+                return (indexes, None, None)
 
             elif signature_i.startswith("ID"):
                 refs = ref_i.split(",")
                 alts = alt_i.split(",")
 
                 for r, a in zip(refs, alts):
-                    pattern = create_indels_pattern(r, a, context_i)
+                    pattern, real_size = create_indels_pattern(r, a, context_i)
                     matches = [(m.start(), m.group()) for m in re.finditer(pattern, sequence_i)]
                     if matches:
-                        return tuple(zip(*matches))
-                return ([], [])
+                        indexes, patterns = zip(*matches)
+                        return (indexes, patterns, real_size)
+                return ([], [], None)
 
             elif signature_i in ("DNP", "TNP", "medium_ins", "big_ins"):
                 indexes = [m.start() for m in re.finditer(ref_i, sequence_i)]
-                return (indexes, None)
+                return (indexes, None, None)
 
             elif signature_i in ("medium_del", "big_del"):
                 indexes = [m.start() for m in re.finditer(alt_i, sequence_i)]
                 patterns = [sequence_i[i:i+int(ref_i)+1] for i in indexes]
-                return (indexes, patterns)
+                return (indexes, patterns, None)
 
-            return ([], None)
+            else:
+                return ([], None, None)
 
-        def update_mutations(mut_i, chrom_i:str, position_i, ctx_indexes_i:list, indel_patterns_i:list|None, fasta) -> Tuple[int, int, int]:
+        def update_mutations(mut_i, chrom_i:str, position_i, ctx_indexes_i:list, indel_patterns_i:list|None, m_size_i:int|None, fasta) -> Tuple[int, int, int]:
 
             if not ctx_indexes_i:
                 return (None, None, None)
@@ -920,19 +926,18 @@ def process_chunk(chunk_data, refGenome, n_attempt):
 
             # Microhomology INDELs
             if ':M:' in mut_i.contexts:
-                m_size, _, _, m_context_length = mut_i.contexts.split(':')
                 m_ref = indel_patterns_i[index_choice]
 
                 m_option = int(not (mut_i.ref.split('|')[0] in m_ref))
 
                 if m_option == 0:
-                    m_pos = position_i + ctx_indexes_i[index_choice]
-                    m_prev_base = fasta[chrom_i][m_pos-1:m_pos].seq
-                    ref = m_prev_base + m_ref[:int(m_size)]
-                    alt = m_prev_base
+                    m_context_length = int(mut_i.contexts.split(':')[-1])
+                    m_pos = position_i + ctx_indexes_i[index_choice] + m_context_length + 1
+                    ref = m_ref[m_context_length:m_context_length + m_size_i + 1]
+                    alt = ref[0]
                 else:
-                    m_pos = position_i + ctx_indexes_i[index_choice] + len(m_ref) - (int(m_size)) 
-                    ref = m_ref[-(int(m_size)+1):]
+                    m_pos = position_i + ctx_indexes_i[index_choice] + len(m_ref) - ((int(m_size_i)+1)) 
+                    ref = m_ref[-(int(m_size_i)+2):-1]
                     alt = ref[0]
 
             # INDELs
@@ -976,8 +981,8 @@ def process_chunk(chunk_data, refGenome, n_attempt):
 
             return (int(m_pos), ref, alt)
         
-        ctx_indexes, indel_patterns = zip(*[find_context_in_sequence(row.signature, row.contexts, row.ref, row.alt, seq) for row, seq in zip(signatures_f.itertuples(index=False), sequences_f)])
-        updated_position, updated_ref, updated_alt = zip(*[update_mutations(row, chrom, pos, ctx_idxs, id_pat, fasta) for row, chrom, pos, ctx_idxs, id_pat in zip(signatures_f.itertuples(index=False), chromosomes_f, positions_f, ctx_indexes, indel_patterns)])
+        ctx_indexes, indel_patterns, real_m_size = zip(*[find_context_in_sequence(row.signature, row.contexts, row.ref, row.alt, seq) for row, seq in zip(signatures_f.itertuples(index=False), sequences_f)])
+        updated_position, updated_ref, updated_alt = zip(*[update_mutations(row, chrom, pos, ctx_idxs, id_pat, id_m_size, fasta) for row, chrom, pos, ctx_idxs, id_pat, id_m_size in zip(signatures_f.itertuples(index=False), chromosomes_f, positions_f, ctx_indexes, indel_patterns, real_m_size)])
         
         updated_signatures = signatures_f.copy()
         updated_signatures['chrom'] = chromosomes_f
