@@ -162,7 +162,7 @@ def hg19tohg38(vcf:pd.DataFrame|None=None, cna:pd.DataFrame|None=None, sv:pd.Dat
 # Models #
 ##########
 
-def calo_forest_generation(load_dir:str, y_labels:list[str]) -> pd.DataFrame:
+def calo_forest_generation(load_dir:str, y_labels:list[str]|tuple[str,...]) -> pd.DataFrame:
     
     """
     Generate samples using Calo-Forest models
@@ -192,7 +192,7 @@ def calo_forest_generation(load_dir:str, y_labels:list[str]) -> pd.DataFrame:
     del model #release model memory
     return Xy_fake_df
 
-def dae_reconstruction(z:pd.DataFrame, dae_model:Literal['driver_profile', 'genomic_profile']) -> pd.DataFrame:
+def dae_reconstruction(z:pd.DataFrame, dae_model:Literal['genomic_profile']) -> pd.DataFrame:
     
     """
     Function to reconstruct diffusion latent spaces using the DAE model
@@ -662,7 +662,7 @@ def simulate_genomic_profile(tumor_list_f:tuple[str, ...], counts_total_f:pd.Ser
                 while n_selected_x_cols < abs(dif_x_mut):
                     remaining:int = abs(dif_x_mut) - n_selected_x_cols
                     exp_x_row:pd.Series = exp_genomic_profiles_f.loc[idx, X_cols]
-                    extra_x_cols:pd.Series = np.random.choice(exp_x_row[exp_x_row >= np.median(exp_x_row)].index.difference(candidate_x_cols), size=remaining, replace=False)
+                    extra_x_cols:np.ndarray = np.random.choice(exp_x_row[exp_x_row >= np.median(exp_x_row)].index.difference(candidate_x_cols), size=remaining, replace=False)
                     profiles.loc[idx, extra_x_cols] += x_sign
                     n_selected_x_cols += len(extra_x_cols)
                 
@@ -706,7 +706,7 @@ def simulate_genomic_profile(tumor_list_f:tuple[str, ...], counts_total_f:pd.Ser
                     while n_selected_y_cols < abs(dif_y_mut):
                         remaining:int = abs(dif_y_mut) - n_selected_y_cols
                         exp_y_row:pd.Series = exp_genomic_profiles_f.loc[idx, Y_cols]
-                        extra_y_cols:pd.Series = np.random.choice(exp_y_row[exp_y_row >= np.median(exp_y_row)].index.difference(candidate_y_cols), size=remaining, replace=False)
+                        extra_y_cols:np.ndarray = np.random.choice(exp_y_row[exp_y_row >= np.median(exp_y_row)].index.difference(candidate_y_cols), size=remaining, replace=False)
                         profiles.loc[idx, extra_y_cols] += y_sign
                         n_selected_y_cols += len(extra_y_cols)
 
@@ -782,12 +782,9 @@ def simulate_driver_profile(tumor_list_f:tuple[str, ...]) -> pd.DataFrame:
     Function to simulate the driver profiles for each donor
     """
 
-    # Generate latent profile
-    latent_profiles:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/driver_profile', tumor_list_f)
-    latent_profiles = latent_profiles.drop(columns=['Tumor'])
-
-    # Reconstruct the profile
-    driver_profiles:pd.DataFrame = dae_reconstruction(latent_profiles, 'driver_profile')
+    # Simulate the driver profile
+    driver_profiles:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/driver_profile', tumor_list_f)
+    driver_profiles = driver_profiles.drop(columns=['Tumor'])
 
     # Get numbers instead of percentages
     driver_profiles = driver_profiles.round(0).astype(int)
@@ -1226,7 +1223,7 @@ def pd2vcf(muts_f:pd.DataFrame, driver_muts_f:pd.DataFrame, vafs_f:list[float], 
         'ALT': muts_f['updated_alt'].tolist() + driver_muts_f['alt'].tolist(),
         'QUAL' : '.',
         'FILTER': '.',
-        'INFO': create_info_field(muts_f, driver_muts_f['gene_name'], vafs_f[:n_muts+1])
+        'INFO': create_info_field(muts_f, driver_muts_f['gene_id'], vafs_f[:n_muts+1])
     })
 
     # Update REF and ALT fields
