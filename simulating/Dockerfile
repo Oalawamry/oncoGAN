@@ -25,6 +25,5 @@ COPY --chmod=777 --chown=$MAMBA_USER:$MAMBA_USER src/* /oncoGAN/
 ENV PATH=$PATH:/oncoGAN
 ENV MPLCONFIGDIR=/tmp
 ## Entrypoint
-WORKDIR /home
-# EXPOSE 5678
+WORKDIR /home/run
 ENTRYPOINT ["/usr/local/bin/_entrypoint.sh", "python", "/oncoGAN/launcher.py"]
