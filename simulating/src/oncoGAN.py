@@ -1249,9 +1249,9 @@ def availTumors():
     """
     List of available tumors to simulate
     """
-    
-    default_tumors:str = '\n'.join(['\t\t'.join(x) for x in default_tumors])
-    click.echo(f"\nThis is the list of available tumor types that can be simulated using oncoGAN:\n\n{default_tumors}\n")
+
+    formatted_tumors = '\n'.join(default_tumors)
+    click.echo(f"\nThis is the list of available tumor types that can be simulated using oncoGAN:\n\n{formatted_tumors}\n")
 
 @click.command(name="vcfGANerator")
 @click.option("-@", "--cpus",
