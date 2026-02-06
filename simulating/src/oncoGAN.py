@@ -1244,13 +1244,13 @@ def cli():
     pass
 
 @click.command(name="availTumors")
-def availTumors():
+def availTumors(default_tumors_f:list[str]=default_tumors):
 
     """
     List of available tumors to simulate
     """
 
-    formatted_tumors = '\n'.join(default_tumors)
+    formatted_tumors = '\n'.join('\t'.join(default_tumors_f[i:i+6]) for i in range(0, len(default_tumors_f), 6))
     click.echo(f"\nThis is the list of available tumor types that can be simulated using oncoGAN:\n\n{formatted_tumors}\n")
 
 @click.command(name="vcfGANerator")
