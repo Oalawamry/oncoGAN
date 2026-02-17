@@ -31,6 +31,11 @@ import pyranges as pr
 VERSION = "1.0.0"
 
 default_tumors:list[str] = ["Biliary-AdenoCA","Bladder-TCC","Bone-Leiomyo","Bone-Osteosarc","Breast-AdenoCa","Cervix-SCC","CNS-GBM","CNS-Medullo","CNS-Oligo","CNS-PiloAstro","ColoRect-AdenoCA","Eso-AdenoCa","Head-SCC","Kidney-ChRCC","Kidney-RCC","Liver-HCC","Lung-AdenoCA","Lung-SCC","Lymph-BNHL","Lymph-CLL","Myeloid-MPN","Ovary-AdenoCA","Panc-AdenoCA","Panc-Endocrine","Prost-AdenoCA","Skin-Melanoma","Stomach-AdenoCA","Thy-AdenoCA","Uterus-AdenoCA"]
+subtumor_dict:dict = {
+        "HRD" : ["SBS3", 0.2],
+        "Smoking" : ["SBS4", 0.2]
+}
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 #################
 # Miscellaneous #
@@ -218,7 +223,7 @@ def dae_reconstruction(z:pd.DataFrame, dae_model:Literal['genomic_profile']) -> 
 # Simulations #
 ###############
 
-def simulate_counts(tumor_f:str, nCases_f:int) -> pd.DataFrame:
+def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None) -> pd.DataFrame:
 
     """
     Function to generate the number of each type of mutation per case
@@ -260,8 +265,15 @@ def simulate_counts(tumor_f:str, nCases_f:int) -> pd.DataFrame:
     counts:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/donor_characteristics', cases_list)
 
     # Clean the output a bit (round, min and max boundaries)
-    tumor_stats:dict = pd.read_pickle('/oncoGAN/trained_models/donor_characteristics/donor_characteristics_stats.pkl')
+    tumor_stats:dict = pd.read_pickle('/oncoGAN/trained_models/donor_characteristics/donor_characteristics_stats.pkl')   
     counts = counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
+
+    # Filter by subtumor if specified
+    if subtumor_f is not None:
+        signature, threshold = subtumor_dict[subtumor_f]
+        sbs_cols:list[str] = [col for col in counts.columns if col.startswith("SBS")]
+        counts = counts[(counts[signature] / counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
+     
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
 
     return counts
@@ -1320,10 +1332,13 @@ def availTumors(default_tumors_f:list[str]=default_tumors):
               default=True,
               show_default=True,
               help="Save plots")
+@click.option("--subtumor",
+              type=click.Choice(subtumor_dict.keys()),
+              help="Specify type of subtumor to simulate based on mutational signatures")
 @click.version_option(version=VERSION,
                       package_name="OncoGAN",
                       prog_name="OncoGAN")
-def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19, simulateMuts, simulateCNA_SV, savePlots):
+def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19, simulateMuts, simulateCNA_SV, savePlots, subtumor):
 
     """
     Command to simulate mutations (VCF), CNAs and SVs for different tumor types using a Flow-Matching Diffusion model
@@ -1346,7 +1361,7 @@ def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19,
     
     # Simulate counts for each type of mutation
     if template is None:
-        counts:pd.DataFrame = simulate_counts(tumor, nCases)
+        counts:pd.DataFrame = simulate_counts(tumor, nCases, subtumor)
         counts_tumor_tag:tuple[str, ...] = tuple(counts.pop('Tumor').to_list())
         counts_total:pd.Series = counts.sum(axis=1)
     else:
