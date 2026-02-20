@@ -32,7 +32,7 @@ VERSION = "1.0.0"
 
 default_tumors:list[str] = ["Biliary-AdenoCA","Bladder-TCC","Bone-Leiomyo","Bone-Osteosarc","Breast-AdenoCa","Cervix-SCC","CNS-GBM","CNS-Medullo","CNS-Oligo","CNS-PiloAstro","ColoRect-AdenoCA","Eso-AdenoCa","Head-SCC","Kidney-ChRCC","Kidney-RCC","Liver-HCC","Lung-AdenoCA","Lung-SCC","Lymph-BNHL","Lymph-CLL","Myeloid-MPN","Ovary-AdenoCA","Panc-AdenoCA","Panc-Endocrine","Prost-AdenoCA","Skin-Melanoma","Stomach-AdenoCA","Thy-AdenoCA","Uterus-AdenoCA"]
 subtumor_dict:dict = {
-        "HRD" : ["SBS3", 0.2],
+        "HRD" : ["SBS3", 0.3],
         "Smoking" : ["SBS4", 0.2]
 }
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -178,6 +178,7 @@ def calo_forest_generation(load_dir:str, y_labels:list[str]|tuple[str,...]) -> p
         model_dict:dict = pickle.load(file)
     model_dict['model'].set_logdir(load_dir)
     model_dict['model'].set_solver_fn(model_dict['cfg']["solver"])
+    model_dict['model'].seed = random.randint(0, 1000000)  # Set a random seed for generation
     reverse_mapping:dict = {v: k for k, v in model_dict['mapping'].items()}
 
     # Prepare the number and type of samples to generate
@@ -267,13 +268,25 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None) -> pd.DataFr
     # Clean the output a bit (round, min and max boundaries)
     tumor_stats:dict = pd.read_pickle('/oncoGAN/trained_models/donor_characteristics/donor_characteristics_stats.pkl')   
     counts = counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
-
+    print(counts)
     # Filter by subtumor if specified
     if subtumor_f is not None:
         signature, threshold = subtumor_dict[subtumor_f]
         sbs_cols:list[str] = [col for col in counts.columns if col.startswith("SBS")]
         counts = counts[(counts[signature] / counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
-     
+        
+        # If after filtering there are not enough cases, generate more until we have enough
+        n = 0
+        while len(counts) < nCases_f:
+            additional_counts:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/donor_characteristics', cases_list)
+            additional_counts = additional_counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
+            additional_counts = additional_counts[(additional_counts[signature] / additional_counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
+            counts = pd.concat([counts, additional_counts], ignore_index=True)
+            n+=1
+            if n >= 10:
+                raise ValueError(f"Could not generate enough cases for subtumor {subtumor_f} after 10 iterations.")
+
+            
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
 
     return counts
