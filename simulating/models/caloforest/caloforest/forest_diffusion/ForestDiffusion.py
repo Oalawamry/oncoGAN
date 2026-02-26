@@ -420,7 +420,7 @@ class ForestModel():
 
         # Generate prior noise
         if seed is None:
-            seed = self.seed + 1 # different seeds should be used for training and generation
+            seed = np.random.randint(1, 1e9)
         elif seed == self.seed:
                 raise ValueError("""You may be using the same noise samples for generation as used in training.\n
               This can lead to non-representative results, or higher likelihood to generate training data.\n
