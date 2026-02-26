@@ -178,7 +178,6 @@ def calo_forest_generation(load_dir:str, y_labels:list[str]|tuple[str,...]) -> p
         model_dict:dict = pickle.load(file)
     model_dict['model'].set_logdir(load_dir)
     model_dict['model'].set_solver_fn(model_dict['cfg']["solver"])
-    model_dict['model'].seed = random.randint(0, 1000000)  # Set a random seed for generation
     reverse_mapping:dict = {v: k for k, v in model_dict['mapping'].items()}
 
     # Prepare the number and type of samples to generate
