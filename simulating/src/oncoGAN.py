@@ -1293,10 +1293,10 @@ def availTumors(default_tumors_f:list[str]=default_tumors):
               default=os.getcwd(),
               show_default=False,
               help="Directory where save the simulations. Default is the current directory")
-@click.option("--hg38", "hg38",
+@click.option("--hg19", "hg19",
               is_flag=True,
               required=False,
-              help="Transform the mutations to hg38")
+              help="Transform the mutations to hg19. Default hg38")
 @click.option("--mut/--no-mut", "simulateMuts",
               is_flag=True,
               required=False,
@@ -1318,7 +1318,7 @@ def availTumors(default_tumors_f:list[str]=default_tumors):
 @click.version_option(version=VERSION,
                       package_name="OncoGAN",
                       prog_name="OncoGAN")
-def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg38, simulateMuts, simulateCNA_SV, savePlots):
+def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19, simulateMuts, simulateCNA_SV, savePlots):
 
     """
     Command to simulate mutations (VCF), CNAs and SVs for different tumor types using a GAN model
@@ -1397,13 +1397,13 @@ def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg38,
             # Write the VCF
             if not simulateCNA_SV:
                 ## Convert from hg19 to hg38
-                if hg38:
+                if not hg19:
                     vcf = hg19tohg38(vcf=vcf)
                 with open(output, "w+") as out:
                     out.write("##fileformat=VCFv4.2\n")
                     out.write(f"##fileDate={date.today().strftime('%Y%m%d')}\n")
                     out.write(f"##source=OncoGAN-v{VERSION}\n")
-                    out.write(f"##reference={'hg38' if hg38 else 'hg19'}\n")
+                    out.write(f"##reference={'hg19' if hg19 else 'hg38'}\n")
                     out.write('##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n')
                     out.write('##INFO=<ID=MS,Number=A,Type=String,Description="Mutation type or mutational signature assigned to each mutation. Available options are: SBS (single base substitution signature), DNP (dinucleotide polymorphism), TNP (trinucleotide polymorphism), ID (indel signature), driver_* (driver mutation sampled from real donors), medium_ins/del (>5 indel size <=10), big_ins/del (>10 indel size <=25)">\n')
                     out.write('##INFO=<ID=SBSCTX,Number=A,Type=String,Description="SBS96 context">\n')
