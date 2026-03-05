@@ -1072,8 +1072,14 @@ def select_driver_mutations(tumor_list_f:tuple[str, ...], driver_profile_f:pd.Da
                 if driver_muts.shape[0] == 0:
                     continue
                 else:
-                    case_driver_mutations.append(driver_muts.sample(n=n, replace=False))
-        driver_mutations[idx] = pd.concat(case_driver_mutations, ignore_index=True)
+                    try: # In case we ask to simulate more mutations than the ones available in the database
+                        case_driver_mutations.append(driver_muts.sample(n=n, replace=False))
+                    except ValueError:
+                        case_driver_mutations.append(driver_muts)
+        if len(case_driver_mutations) > 0:
+            driver_mutations[idx] = pd.concat(case_driver_mutations, ignore_index=True)
+        else:
+            driver_mutations[idx] = pd.DataFrame(columns=['chrom', 'start', 'mut', 'ref', 'alt', 'gene_id', 'tumor'])
     
     return driver_mutations
 
