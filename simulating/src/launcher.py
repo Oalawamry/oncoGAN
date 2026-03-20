@@ -1,5 +1,8 @@
 #!/usr/local/bin/python3
 
+import warnings
+warnings.filterwarnings(action="ignore", message="h5py is running against HDF5")
+
 import click
 from oncoGAN import availTumors, oncoGAN
 from mergeVCFs import mergeVCFs
