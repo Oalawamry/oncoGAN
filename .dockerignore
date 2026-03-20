@@ -1,4 +1,7 @@
 **/__pycache__/
 **/.DS_Store
-trained_models
+bam_implementation
+deeptumour
+test
+trained_models*
 template_custom_simulation.csv
