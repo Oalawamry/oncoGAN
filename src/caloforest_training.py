@@ -12,7 +12,6 @@ import pickle
 import torch
 import numpy as np
 import pandas as pd
-import warnings
 
 from caloforest.writer import get_writer
 from caloforest.forest_diffusion import ForestModel
