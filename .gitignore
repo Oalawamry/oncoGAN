@@ -1,8 +1,7 @@
 **/.DS_Store
 **/__pycache__
-**/.vscode
 **/.github
-.devcontainer
-test
+test/hg19
+test/results
 trained_models*
 bam_implementation/test_real_case/reference

@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "docker-run",
+      "type": "shell",
+      "command": "docker run --rm -p 5678:5678 -v ${workspaceFolder}/test/hg19:/reference -v ${workspaceFolder}/src:/oncoGAN -v ${workspaceFolder}/models:/oncoGAN/models -v ${workspaceFolder}/trained_models_v1:/oncoGAN/trained_models -v ${workspaceFolder}/test:/oncoGAN/test --name oncogan-debug --platform linux/amd64 oicr/oncogan:v1.0.0 /usr/local/bin/_entrypoint.sh python -m debugpy --listen 0.0.0.0:5678 --wait-for-client /oncoGAN/launcher.py vcfGANerator -n 2 --tumor Breast-AdenoCa -r /reference/hs37d5.fa --no-CNA-SV --outDir /oncoGAN/test",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

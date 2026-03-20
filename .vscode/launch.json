@@ -1,0 +1,53 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "DevContainer - OncoGAN",
+      "type": "debugpy",
+      "request": "launch",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "program": "/oncoGAN/launcher.py",
+      "args": [
+        "vcfGANerator",
+        "-n", "1",
+        "--tumor", "Breast-AdenoCa",
+        "-r", "/reference/hs37d5.fa",
+        "--no-CNA-SV",
+        "--outDir", "/workspace/test/results"
+      ],
+      "python": "/opt/conda/bin/python3.10"
+    },
+    {
+      "name": "DevContainer - OncoGAN - template",
+      "type": "debugpy",
+      "request": "launch",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "program": "/oncoGAN/launcher.py",
+      "args": [
+        "vcfGANerator",
+        "--template", "/workspace/test/template_test.csv",
+        "-r", "/reference/hs37d5.fa",
+        "--no-CNA-SV",
+        "--outDir", "/workspace/test/results",
+      ],
+      "python": "/opt/conda/bin/python3.10"
+    },
+    {
+      "name": "DevContainer - CaloForest",
+      "type": "debugpy",
+      "request": "launch",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "program": "/oncoGAN/launcher.py",
+      "args": [
+        "trainCaloForest",
+        "--csv", "/workspace/test/caloforest_training_test.csv",
+        "--config", "/workspace/test/caloforest_config_test.json",
+        "--prefix", "caloforest_test",
+      ],
+      "python": "/opt/conda/bin/python3.10"
+    }
+  ]
+}
