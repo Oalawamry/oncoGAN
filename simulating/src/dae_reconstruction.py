@@ -1,6 +1,5 @@
 import sys
 sys.path.append('/oncoGAN/models')
-# sys.path.append('/Users/ander/GitHub/oncoGAN/simulating/models/')
 
 import click
 import pickle
