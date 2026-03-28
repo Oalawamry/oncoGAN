@@ -1,11 +1,24 @@
-[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/LincolnSteinLab/oncoGAN/tree/main/LICENSE) ![training](https://badgen.net/badge/training/v0.2/blue) ![simulating](https://badgen.net/badge/simulating/v0.2.1/blue) ![fasta2bam](https://badgen.net/badge/fasta2bam/v0.1/blue)
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/LincolnSteinLab/oncoGAN/tree/main/LICENSE) ![version](https://badgen.net/badge/version/v1.0.0/blue) ![fasta2bam](https://badgen.net/badge/fasta2bam/v0.1/blue)
  [![zenodo](https://img.shields.io/badge/docs-zenodo-green)](https://zenodo.org/records/13946726) [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.13946726.svg)](https://doi.org/10.5281/zenodo.13946726) [![Model on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm-dark.svg)](https://huggingface.co/anderdnavarro/OncoGAN) [![Dataset on HF](https://huggingface.co/datasets/huggingface/badges/resolve/main/dataset-on-hf-sm-dark.svg)](https://huggingface.co/collections/anderdnavarro/oncogan-67110940dcbafe5f1aa2d524)
 
 # OncoGAN
 
-A pipeline that accurately simulates high quality publicly cancer genomes (VCFs, CNAs and SVs) for eight different tumor types: Breast-AdenoCa, CNS-PiloAstro, Eso-AdenoCa, Kidney-RCC, Liver-HCC, Lymph-CLL, Panc-Endocrine and Prost-AdenoCa. OncoGAN offers a solution to current challenges in data accessibility and privacy while also serving as a powerful tool for enhancing algorithm development and benchmarking.
+A pipeline that accurately simulates high quality publicly cancer genomes (VCFs, CNAs and SVs). OncoGAN offers a solution to current challenges in data accessibility and privacy while also serving as a powerful tool for enhancing algorithm development and benchmarking.
 
-In addition to this pipeline, we have released 200 simulated VCFs for each of the eight studied tumor types, and that are availbale on [HuggingFace](https://huggingface.co/datasets/anderdnavarro/OncoGAN-syntheticVCFs) and [Zotero](https://zenodo.org/records/13946726).
+## Big update - v1.0.0 - Main changes
+
+We have upgraded the internal generative models from Generative Adversarial Network (GAN)–based architectures ([CTAB-GAN+](https://github.com/Team-TUD/CTAB-GAN-Plus) and [CTGAN](https://docs.sdv.dev/sdv)) tto a Flow-Matching Diffusion–based approach ([Calo-Forest](https://github.com/layer6ai-labs/calo-forest)).
+
+This new architecture provides several key improvements:
+- Higher accuracy in simulated mutational profiles
+- Substantially expanded Single Base Substitutions (SBSs) signature coverage (v0.2.1: 6–8 → v1.0.0: 60)
+- Inclusion of indel (IDs) signatures (v0.2.1: 0 → v1.0.0: 17)
+- Improved genomic distribution of mutations at resolutions up to 1 Mb
+- Enhanced driver mutation profiles
+
+Additionally, `simulation` and `training` Docker images are now merged into a single, lightweight, and user-friendly image.
+
+---
 
 ## Index
 
@@ -18,9 +31,8 @@ In addition to this pipeline, we have released 200 simulated VCFs for each of th
     - [Custom profiles](#tumors-with-custom-profiles)
     - [More options](#more-options)
 3. [Train new models](#train-new-models)
-    - [Baseline command](#baseline-command)
-    - [CTAB-GAN+ models](#ctab-gan-models)
-    - [CTGAN/TVAE models](#ctgantvae-models)
+    - [Calo-Forest command](#calo-forest-command)
+    - [DAE command](#dae-command)
 4. [DeepTumour](#deeptumour)
 5. [Create tumor BAMs](#create-tumor-bams)
     - [Preparation of a tumor FASTA genome](#preparation-of-a-tumor-fasta-genome)
@@ -31,8 +43,7 @@ In addition to this pipeline, we have released 200 simulated VCFs for each of th
 
 We have created three docker images with all dependencies installed as there are version incompatibility issues between the different modules: 
 
-- Training -> Environment and scripts used to train OncoGAN models (CUDA)
-- Simulating -> Pipeline for synthetic tumor simulation (CPU only)
+- OncoGAN -> Environment and scripts used to simulate and train OncoGAN models
 - DeepTumour -> Algorithm developed to detect the tumor type of origin based o somatic mutations ([Ref](https://www.nature.com/articles/s41467-019-13825-8))
 - fasta2bam -> Module to generate FASTQ/BAM files using OncoGAN's output
 
@@ -43,11 +54,8 @@ However, due to the size of the models, they couldn’t be stored in the Docker 
 If you don't have docker already installed in your system, please follow these [instructions](https://docs.docker.com/get-docker/).
 
 ```bash
-# Training
-docker pull oicr/oncogan:training_v0.2
-
-# Simulating
-docker pull oicr/oncogan:simulating_v0.2.1
+# OncoGAN
+docker pull oicr/oncogan:v1.0.0
 
 # DeepTumour
 docker pull ghcr.io/lincolnsteinlab/deeptumour:3.0.5
@@ -61,11 +69,8 @@ docker pull oicr/oncogan:fasta2bam_v0.1
 If you don't have singularity already installed in your system, please follow these [instructions](https://apptainer.org/admin-docs/master/installation.html).
 
 ```bash
-# Training
-singularity pull docker://oicr/oncogan:training_v0.2
-
-# Simulating
-singularity pull docker://oicr/oncogan:simulating_v0.2.1
+# OncoGAN
+singularity pull docker://oicr/oncogan:v1.0.0
 
 # DeepTumour
 singularity pull docker://ghcr.io/lincolnsteinlab/deeptumour:3.0.5
@@ -76,7 +81,7 @@ singularity pull docker://oicr/oncogan:fasta2bam_v0.1
 
 ### Download models
 
-OncoGAN trained models for the eight tumor types and DeepTumour models can be found on [HuggingFace](https://huggingface.co/anderdnavarro/OncoGAN) and [Zotero](https://zenodo.org/records/13946726).
+OncoGAN models for the thirty tumor types and DeepTumour models (default and enhanced with OncoGAN v0.2.1 samples) can be found on [HuggingFace](https://huggingface.co/anderdnavarro/OncoGAN) and [Zotero](https://zenodo.org/records/13946726).
 
 ## Generate synthetic VCFs
 
@@ -85,7 +90,7 @@ OncoGAN needs two external inputs to simulate new samples:
 1. The directory with OncoGAN models downloaded previously
 2. **hg19 fasta** reference genome without the *chr* prefix 
 
-The output is a VCF file (mutations), two TSV files (CNAs and SVs) and a PNG (CNA+SV plot) per donor. Since the PCAWG dataset used for training refers to the hg19 version of the genome, the new mutations are also aligned to that version. The integrated `LiftOver` version can be used to swicht to hg38.
+The output consists of one VCF file (mutations), two TSV files (CNAs and SVs), and one PNG file (CNA + SV plot) per donor, all reported in GRCh38 genomic coordinates by default.
 
 ### Tumors with real profiles
 
@@ -95,15 +100,15 @@ docker run --rm -u $(id -u):$(id -g) \
            -v $(pwd):/home \
            -v /PATH_TO_HG19_DIR/:/reference \
            -v /PATH_TO_ONCOGAN_MODELS/:/oncoGAN/trained_models \
-           -it oicr/oncogan:simulating_v0.2.1 \
-           vcfGANerator -n 1 --tumor Breast-AdenoCa -r /reference/hs37d5.fa [--hg38]
+           -it oicr/oncogan:v1.0.0 \
+           vcfGANerator -n 1 --tumor Breast-AdenoCa -r /reference/hs37d5.fa
 
 # Singularity command
 singularity exec -H ${pwd}:/home \
             -B /PATH_TO_HG19_DIR/:/reference \
             -B /PATH_TO_ONCOGAN_MODELS/:/oncoGAN/trained_models \
-            /PATH_TO/oncogan_simulating_v0.2.1.sif launcher.py \
-            vcfGANerator -n 1 --tumor Breast-AdenoCa -r /reference/hs37d5.fa [--hg38]
+            /PATH_TO/oncogan_v1.0.0.sif launcher.py \
+            vcfGANerator -n 1 --tumor Breast-AdenoCa -r /reference/hs37d5.fa
 ```
 
 The options for the `vcfGANerator` function are:
@@ -111,32 +116,37 @@ The options for the `vcfGANerator` function are:
 ```bash
 vcfGANerator --help
 
-# Command to simulate mutations (VCF), CNAs and SVs for different tumor types using a GAN model
-
-# Options:
-#   -@, --cpus INTEGER      Number of CPUs to use  [default: 1]
-#   --tumor TEXT            Tumor type to be simulated. Run 'availTumors'
-#                           subcommand to check the list of available tumors that
-#                           can be simulated  [required]
-#   -n, --nCases INTEGER    Number of cases to simulate  [default: 1]
-#   --NinT FLOAT            Normal in Tumor contamination to be taken into account when 
-#                           adjusting VAF for CNA-SV events (e.g. 0.20 = 20%) [default: 0.0]
-#   -r, --refGenome PATH    hg19 reference genome in fasta format  [required]
-#   --prefix TEXT           Prefix to name the output. If not, '--tumor' option is
-#                           used as prefix
-#   --outDir DIRECTORY      Directory where save the simulations. Default is the
-#                           current directory
-#   --hg38                  Transform the mutations to hg38
-#   --mut / --no-mut        Simulate mutations  [default: mut]
-#   --CNA-SV / --no-CNA-SV  Simulate CNA and SV events  [default: CNA-SV]
-#   --plots / --no-plots    Save plots  [default: plots]
-#   --version               Show the version and exit
-#   --help                  Show this message and exit
+#  Command to simulate mutations (VCF), CNAs and SVs for different tumor types
+#  using a Flow-Matching Diffusion model
+#
+#Options:
+#  -@, --cpus INTEGER      Number of CPUs to use  [default: 1]
+#  --tumor TEXT            Tumor type to be simulated. Run 'availTumors'
+#                          subcommand to check the list of available tumors
+#                          that can be simulated
+#  -n, --nCases INTEGER    Number of cases to simulate  [default: 1]
+#  --NinT FLOAT            Normal in Tumor contamination to be taken into
+#                          account when adjusting VAF for CNA-SV events (e.g.
+#                          0.20 = 20%)  [default: 0.0]
+#  --template PATH         File in CSV format with the number of each type of
+#                          mutation to simulate for each donor (template
+#                          available on GitHub)
+#  -r, --refGenome PATH    hg19 reference genome in fasta format  [required]
+#  --prefix TEXT           Prefix to name the output. If not, '--tumor' option
+#                          is used as prefix
+#  --outDir DIRECTORY      Directory where save the simulations. Default is 
+#                          the current directory
+#  --hg19                  Transform the mutations to hg19. Default hg38
+#  --mut / --no-mut        Simulate mutations  [default: mut]
+#  --CNA-SV / --no-CNA-SV  Simulate CNA and SV events  [default: CNA-SV]
+#  --plots / --no-plots    Save plots  [default: plots]
+#  --version               Show the version and exit
+#  --help                  Show this message and exit
 ```
 
 ### Tumors with custom profiles
 
-To generate tumors with custom profiles, users can use the [template](simulating/template_custom_simulation.csv), which contains a list of possible mutation types and signatures to simulate. If no CNA-SV are required, the `cna-sv profile` can be set to `-`.
+To generate tumors with custom profiles, users can use the [template](template_custom_simulation.csv), which contains a list of possible mutation types and signatures to simulate. If no CNA-SV are required, the `cna-sv profile` can be set to `-`.
 
 ```bash
 # Docker command
@@ -144,37 +154,15 @@ docker run --rm -u $(id -u):$(id -g) \
            -v $(pwd):/home \
            -v /PATH_TO_HG19_DIR/:/reference \
            -v /PATH_TO_ONCOGAN_MODELS/:/oncoGAN/trained_models \
-           -it oicr/oncogan:simulating_v0.2.1 \
-           vcfGANerator-custom --template /home/template_custom_simulation.csv -r /reference/hs37d5.fa [--hg38]
+           -it oicr/oncogan:v1.0.0 \
+           vcfGANerator --template /home/template_custom_simulation.csv -r /reference/hs37d5.fa
 
 # Singularity command
 singularity exec -H ${pwd}:/home \
             -B /PATH_TO_HG19_DIR/:/reference \
             -B /PATH_TO_ONCOGAN_MODELS/:/oncoGAN/trained_models \
-            /PATH_TO/oncogan_simulating_v0.2.1.sif launcher.py \
-            vcfGANerator-custom --template /home/template_custom_simulation.csv -r /reference/hs37d5.fa [--hg38]
-```
-
-The options for the `vcfGANerator-custom` function are:
-
-```bash
-vcfGANerator-custom --help
-
-# Command to simulate mutations (VCF), CNAs and SVs for personalized tumors using a GAN model
-
-# Options:
-#   -@, --cpus INTEGER      Number of CPUs to use  [default: 1]
-#   --template PATH         File in CSV format with the number of each type of
-#                           mutation to simulate for each donor (template
-#                           available on GitHub)  [required]
-#   -r, --refGenome PATH    hg19 reference genome in fasta format  [required]
-#   --outDir DIRECTORY      Directory where save the simulations. Default is the
-#                           current directory
-#   --hg38                  Transform the mutations to hg38
-#   --CNA-SV / --no-CNA-SV  Simulate CNA and SV events  [default: CNA-SV]
-#   --plots / --no-plots    Save plots  [default: plots]
-#   --version               Show the version and exit
-#   --help                  Show this message and exit
+            /PATH_TO/oncogan_v1.0.0.sif launcher.py \
+            vcfGANerator --template /home/template_custom_simulation.csv -r /reference/hs37d5.fa
 ```
 
 Among all the options offered by docker (`docker run --help`), we recommend:
@@ -193,157 +181,67 @@ For singularity, the `-H` and `-B` options are analogous to `-v` docker option.
 List of available tumors:
 
 ```bash
-docker run --rm -it oicr/oncogan:simulating_v0.2.1 availTumors
+docker run --rm -it oicr/oncogan:v1.0.0 availTumors
 
 # or 
 
-singularity exec /PATH_TO/oncogan_simulating_v0.2.1.sif launcher.py availTumors
-
-# This is the list of available tumor types that can be simulated using OncoGAN:
-# Breast-AdenoCa          CNS-PiloAstro           Eso-AdenoCa             Kidney-RCC              
-# Liver-HCC               Lymph-CLL               Panc-Endocrine          Prost-AdenoCA
+singularity exec /PATH_TO/oncogan_v1.0.0.sif launcher.py availTumors
+ 
+# This is the list of available tumor types that can be simulated using oncoGAN:
+# 
+# Biliary-AdenoCA Bladder-TCC     Bone-Leiomyo    Bone-Osteosarc  Breast-AdenoCa    Cervix-SCC
+# CNS-GBM         CNS-Medullo     CNS-Oligo       CNS-PiloAstro   ColoRect-AdenoCA  Eso-AdenoCa
+# Head-SCC        Kidney-ChRCC    Kidney-RCC      Liver-HCC       Lung-AdenoCA      Lung-SCC
+# Lymph-BNHL      Lymph-CLL       Myeloid-MPN     Ovary-AdenoCA   Panc-AdenoCA      Panc-Endocrine
+# Prost-AdenoCA   Skin-Melanoma   Stomach-AdenoCA Thy-AdenoCA     Uterus-AdenoCA
 ```
 
 ## Train new models
 
-Files used to train OncoGAN models can be found [HuggingFace](https://huggingface.co/datasets/anderdnavarro/OncoGAN-training_files) and [Zotero](https://zenodo.org/records/13946726). The directory containing these files or your custom training files need to be mounted into the docker/singularity container.
+Files used to train OncoGAN models can be found on [HuggingFace](https://huggingface.co/datasets/anderdnavarro/OncoGAN-training_files) and [Zotero](https://zenodo.org/records/13946726). The directory containing these files or your custom training files need to be mounted into the docker/singularity container.
 
 We used two different training approaches: 
 
-- [CTAB-GAN+](https://github.com/Team-TUD/CTAB-GAN-Plus) -> To train *donor characteristics*, *drivers*, *mutational signatures* and *CNA and SV features* 
-- [CTGAN + TVAE](https://docs.sdv.dev/sdv) -> To train *genomic positions*
+- [Calo-Forest](https://github.com/layer6ai-labs/calo-forest) -> To train *donor characteristics*, *mutational signatures*, *genomic positions* and *drivers*
+- Denoising AutoEncoder (DAE) -> To reduce *genomic positions* training file dimensionality prior to Calo-Forest training (Encoder). During simulation we used the Decoder model to transform back the *genomic positions* from latent space to real genomic length.
 
-### Baseline command
+### Calo-Forest command
 
-The baseline command to run the docker/singularity container is the same for all the different training modalities:
+The command to train a Calo-Forest model is:
 
 ```bash
 docker run --rm -u $(id -u):$(id -g) \
            -v $(pwd):/home \
-           -v /PATH_TO_TRAINING_FILES/:/inputs \
-           -p 8890:8890 \ #Only for CTGAN/TVAE models
-           -it oicr/oncogan:training_v0.2 --help
+           -it oicr/oncogan:v1.0.0 \
+           trainCaloForest --csv /home/caloforest_training_test.csv --config /home/caloforest_config_test.json --prefix caloforest_test
 
-# or
-
+# Singularity command
 singularity exec -H ${pwd}:/home \
-            -B /PATH_TO_TRAINING_FILES/:/inputs \
-            /PATH_TO/oncogan_training_v0.2.sif launcher.py --help
-
-# Options:
-#   --help  Show this message and exit.
-
-# Commands:
-#   jupyter              Launches a jupyter lab instance
-#   testHyperparameters  Test hyperparameters for counts/drivers CTABGAN...
-#   trainCNA             Train a CTABGAN model for CNAs
-#   trainCounts          Train a CTABGAN model for donor characteristics
-#   trainDrivers         Train a CTABGAN model for driver features
-#   trainMutations       Train a CTABGAN model for mutations
-#   trainSV              Train a CTABGAN model for SVs
-#   useModel             Use a CTABGAN model to generate synthetic data
+            /PATH_TO/oncogan_v1.0.0.sif launcher.py \
+            trainCaloForest --csv /home/caloforest_training_test.csv --config /home/caloforest_config_test.json --prefix caloforest_test
 ```
 
-### CTAB-GAN+ models
+### DAE command #TODO
 
-#### `trainCounts` / `trainDrivers` / `trainMutations` / `trainCNA` / `trainSV` 
-
-Commands to train *donor characteristics*, *drivers*, *mutational signatures* and *CNA and SV features* models, respectively. The output will be a model and a simulated file with the same format and shape as the training file. All scripts have a very similar usage:
+We reccomend training the DAE model interactively inside the Docker container, using as template the [`dae_training.py` script](src/dae_training.py):
 
 ```bash
-# Baseline command +
-trainCounts --help
+docker run --rm -u $(id -u):$(id -g) \
+           -v $(pwd):/home \
+           --entrypoint /bin/bash \
+           -it oicr/oncogan:v1.0.0
 
-# Options:
-#   --csv PATH                  CSV file with the counts used to train the model
-#                               [required]
-#   --prefix TEXT               Prefix to use to save the model  [required]
-#   --outdir DIRECTORY          Directory where save the model  [default: /home]
-#   --epochs INTEGER            Number of epochs  [default: 100]
-#   --batch_size INTEGER        Batch size  [default: 20]
-#   --test_ratio FLOAT          Test ratio  [default: 0.3]
-#   --lr FLOAT                  Learning rate  [default: 0.0002]
-#   --categorical_columns TEXT  Categorical columns. Comma separated with no
-#                               space (e.g. x,y,z)
-#   --log_columns TEXT          Log columns. Comma separated with no space (e.g.
-#                               x,y,z)
-#   --integer_columns TEXT      Integer columns. Comma separated with no space
-#                               (e.g. x,y,z)
-#   --no-tqdm                   Disable tqdm progress bar
-#   --help                      Show this message and exit
-```
+# Activate the specific conda environment
+> micromamba activate dae
 
-#### `testHyperparameters`
+# Singularity command
+singularity shell -H ${pwd}:/home \
+            /PATH_TO/oncogan_v1.0.0.sif
 
-Command to automatically test a combination of hyperparameters for *donor characteristics (counts)* and *drivers* models. The output will be a model and a simulated file for each hyperparameter combination.
+# Activate the specific conda environment
+> micromamba activate dae
 
-```bash
-# Baseline command +
-testHyperparameters --help
-
-# Test hyperparameters for counts/drivers CTABGAN models
-
-# Options:
-#   --cpu INTEGER                   Number of CPUs to use  [default: 1]
-#   --function [counts|drivers]     Function to test hyperparameters for [required]
-#   --csv PATH                      CSV file with the counts used to train the model  [required]
-#   --prefix TEXT                   Prefix to use to save the model  [required]
-#   --outdir DIRECTORY              Directory where save the model  [default: /home]
-#   --epochs <INTEGER INTEGER INTEGER>...
-#                                   A list with an epoch range: start stop step
-#   --batch_size <INTEGER INTEGER INTEGER>...
-#                                   A list with a batch_size range: start stop step
-#   --lr <FLOAT FLOAT FLOAT>...     A list with a learning rate range: start stop step
-#   --categorical_columns TEXT      Categorical columns. Comma separated with no
-#                                   space (e.g. x,y,z)
-#   --log_columns TEXT              Log columns. Comma separated with no space
-#                                   (e.g. x,y,z)
-#   --integer_columns TEXT          Integer columns. Comma separated with no
-#                                   space (e.g. x,y,z)
-#   --debug                         Greater verbosity for debugging purposes
-#   --help                          Show this message and exit
-```
-
-An example of how to specify the range of the hyperparameters to test would be:
-
-```bash
-# Baseline command +
-testHyperparameters --cpu 1 --function counts --csv /inputs/counts/Breast-AdenoCa_counts.csv --prefix Breast-AdenoCa --epochs 100 500 20 --batch_size 10 30 5 --lr 0.001 0.01 0.001 --integer_columns DEL,DNP,INS,TNP,SBS1,SBS2,SBS3,SBS5,SBS8,SBS13,SBS18
-```
-
-#### `useModel`
-
-Training commands return the model and a simulated file with the same format and shape as the training file. To generate more simulated files to check the performance of the model you can run the `useModel` command:
-
-```bash
-# Baseline command +
-useModel --help
-
-# Use a driver/count CTABGAN model to generate synthetic data
-
-# Options:
-#   --model PATH        Model to use for the simulations (counts/drivers) [required]
-#   --outdir DIRECTORY  Directory where save the simulations [default: /home]
-#   --nDonors INTEGER   Number of donors to simulate for each simulation [default: 1]
-#   --nFiles INTEGER    Number of files to simulate  [default: 1]
-#   --help              Show this message and exit
-```
-
-### CTGAN/TVAE models
-
-To train genomic position models using the CTGAN/TVAE approach we use a jupyter notebook inside the docker/singularity container. The output will be a model and a simulated file with the same format and shape as the training file.
-
-The notebook with all the steps to train the models can be found [here](https://github.com/LincolnSteinLab/oncoGAN/blob/main/training/src/ctgan/position_simulation_training_example.ipynb).
-
-```bash
-# Baseline command +
-jupyter --help
-
-# Launches a jupyter lab instance
-
-# Options:
-#   --port INTEGER  Port to launch jupyter lab on  [default: 8890]
-#   --help          Show this message and exit.
+# Then, run the dae_training.py script with your custom configuration
 ```
 
 ## DeepTumour
