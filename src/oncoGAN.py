@@ -1367,7 +1367,7 @@ def availTumors(default_tumors_f:list[str]=default_tumors):
 @click.version_option(version=VERSION,
                       package_name="OncoGAN",
                       prog_name="OncoGAN")
-def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19, simulateMuts, simulateCNA_SV, savePlots, subtumor):
+def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19, simulateMuts, simulateCNA_SV, savePlots, subtumor, submodel):
 
     """
     Command to simulate mutations (VCF), CNAs and SVs for different tumor types using a Flow-Matching Diffusion model
