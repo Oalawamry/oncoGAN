@@ -27,6 +27,7 @@ from tqdm import tqdm
 from pyfaidx import Fasta
 from Bio.Seq import Seq
 import pyranges as pr
+import glob
 
 VERSION = "1.0.0"
 
@@ -36,6 +37,8 @@ subtumor_dict:dict = {
         "Smoking" : ["SBS4", 0.2]
 }
 warnings.simplefilter(action='ignore', category=FutureWarning)
+submodel_list:list[str] = [d.split('donor_characteristics_')[1] for d in glob.glob('/oncoGAN/trained_models/donor_characteristics_*')]
+
 
 #################
 # Miscellaneous #
@@ -223,7 +226,7 @@ def dae_reconstruction(z:pd.DataFrame, dae_model:Literal['genomic_profile']) -> 
 # Simulations #
 ###############
 
-def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None) -> pd.DataFrame:
+def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None, submodel_f:str=None) -> pd.DataFrame:
 
     """
     Function to generate the number of each type of mutation per case
@@ -252,6 +255,17 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None) -> pd.DataFr
                 row[col] = round(val)
         return row
     
+    # Determine model directory to use
+    if submodel_f is not None:
+        donor_dir = f'/oncoGAN/trained_models/donor_characteristics_{submodel_f}'
+    else:
+        general_path = ('/oncoGAN/trained_models/donor_characteristics_general')
+        legacy_path = ('/oncoGAN/trained_models/donor_characteristics')
+        if os.path.isdir(general_path):
+            donor_dir = general_path
+        elif os.path.isdir(legacy_path):
+            donor_dir = legacy_path
+
     # Prepare the list of donors to simulate
     nCases_x5:int = nCases_f * 5
     if tumor_f == "Lymph-CLL":
@@ -262,10 +276,10 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None) -> pd.DataFr
         cases_list:list[str] = [tumor_f]*nCases_x5
     
     # Generate samples
-    counts:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/donor_characteristics', cases_list)
+    counts:pd.DataFrame = calo_forest_generation(donor_dir, cases_list)
 
     # Clean the output a bit (round, min and max boundaries)
-    tumor_stats:dict = pd.read_pickle('/oncoGAN/trained_models/donor_characteristics/donor_characteristics_stats.pkl')   
+    tumor_stats:dict = pd.read_pickle(os.path.join(donor_dir, 'donor_characteristics_stats.pkl'))
     counts = counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
     print(counts)
     # Filter by subtumor if specified
@@ -1347,6 +1361,9 @@ def availTumors(default_tumors_f:list[str]=default_tumors):
 @click.option("--subtumor",
               type=click.Choice(subtumor_dict.keys()),
               help="Specify type of subtumor to simulate based on mutational signatures")
+@click.option("--submodel",
+              type=click.Choice(submodel_list),
+              help="Specify submodels to use")
 @click.version_option(version=VERSION,
                       package_name="OncoGAN",
                       prog_name="OncoGAN")
@@ -1373,7 +1390,7 @@ def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19,
     
     # Simulate counts for each type of mutation
     if template is None:
-        counts:pd.DataFrame = simulate_counts(tumor, nCases, subtumor)
+        counts:pd.DataFrame = simulate_counts(tumor, nCases, subtumor, submodel)
         counts_tumor_tag:tuple[str, ...] = tuple(counts.pop('Tumor').to_list())
         counts_total:pd.Series = counts.sum(axis=1)
     else:
