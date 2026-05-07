@@ -65,7 +65,8 @@ default_cna_tumors:dict[str, list[str]] = {
 }
 subtumor_dict:dict = {
         "HRD" : ["SBS3", 0.3],
-        "Smoking" : ["SBS4", 0.2]
+        "Smoking" : ["SBS4", 0.2],
+        "BRCA" : ["BRCA_pathogenic_variant", 1]
 }
 submodel_list:list[str] = [d.split('donor_characteristics_')[1] for d in glob.glob('/oncoGAN/trained_models/donor_characteristics_*')]
 
@@ -283,20 +284,34 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None, submodel_f:s
     # Filter by subtumor if specified
     if subtumor_f is not None:
         signature, threshold = subtumor_dict[subtumor_f]
-        sbs_cols:list[str] = [col for col in counts.columns if col.startswith("SBS")]
-        counts = counts[(counts[signature] / counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
-        
-        # If after filtering there are not enough cases, generate more until we have enough
-        n = 0
-        while len(counts) < nCases_f:
-            additional_counts:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/donor_characteristics', cases_list)
-            additional_counts = additional_counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
-            additional_counts = additional_counts[(additional_counts[signature] / additional_counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
-            counts = pd.concat([counts, additional_counts], ignore_index=True)
-            n+=1
-            if n >= 10:
-                raise ValueError(f"Could not generate enough cases for subtumor {subtumor_f} after 10 iterations.")
-
+        if signature.startswith("SBS"):
+            sbs_cols:list[str] = [col for col in counts.columns if col.startswith("SBS")]
+            counts = counts[(counts[signature] / counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
+            
+            # If after filtering there are not enough cases, generate more until we have enough
+            n = 0
+            while len(counts) < nCases_f:
+                additional_counts:pd.DataFrame = calo_forest_generation(donor_dir, cases_list)
+                additional_counts = additional_counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
+                additional_counts = additional_counts[(additional_counts[signature] / additional_counts[sbs_cols].sum(axis=1)) >= threshold].reset_index(drop=True)
+                counts = pd.concat([counts, additional_counts], ignore_index=True)
+                n+=1
+                if n >= 10:
+                    raise ValueError(f"Could not generate enough cases for subtumor {subtumor_f} after 10 iterations.")
+        # If not an SBS signature then look for 0 or 1
+        elif signature.endswith("variant"):
+            counts = counts[counts[signature] == threshold].reset_index(drop=True)
+            
+            # If after filtering there are not enough cases, generate more until we have enough
+            n = 0
+            while len(counts) < nCases_f:
+                additional_counts:pd.DataFrame = calo_forest_generation(donor_dir, cases_list)
+                additional_counts = additional_counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
+                additional_counts = additional_counts[additional_counts[signature] == threshold].reset_index(drop=True)
+                counts = pd.concat([counts, additional_counts], ignore_index=True)
+                n+=1
+                if n >= 10:
+                    raise ValueError(f"Could not generate enough cases for subtumor {subtumor_f} after 10 iterations.")
             
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
 

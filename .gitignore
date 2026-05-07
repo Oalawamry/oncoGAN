@@ -5,3 +5,5 @@ test/hg19
 test/results
 trained_models*
 fasta2bam/test_real_case/reference
+
+test/brca*
