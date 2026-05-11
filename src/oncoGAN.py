@@ -246,9 +246,9 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str=None, submodel_f:s
                 row[col] = val
             elif stats.get('All_Zero', False):
                 row[col] = 0
-            elif val < stats['Min'] * 0.8:
+            elif round(val) < stats['Min'] * 0.8:
                 row[col] = 0
-            elif val > stats['Max'] * 1.3:
+            elif round(val) > stats['Max'] * 1.3:
                 row[col] = np.nan
             else:
                 row[col] = val

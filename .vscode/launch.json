@@ -44,12 +44,12 @@
       "program": "/oncoGAN/launcher.py",
       "args": [
         "vcfGANerator",
-        "-n", "1",
+        "-n", "3",
         "--tumor", "Breast-AdenoCa",
         "-r", "/reference/hs37d5.fa",
         "--no-CNA-SV",
         "--outDir", "/workspace/test/results",
-        "--submodel", "brca04"
+        "--submodel", "brca01"
       ],
       "python": "/opt/conda/bin/python3.10"
     },
