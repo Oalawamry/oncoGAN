@@ -1544,19 +1544,19 @@ def oncoGAN(cpus, tumor, nCases, nit, template, refGenome, prefix, outDir, hg19,
     if not os.path.exists(outDir):
         os.makedirs(outDir)
     
-    # Simulate counts for each type of mutation
+    # Simulate counts for each type of mutation while excluding non-mutation fields
     if template is None:
         counts:pd.DataFrame = simulate_counts(tumor, nCases, subtumor, submodel)
         prefix_list:tuple[str, ...] = tuple(f"{(prefix or 'sim')}{idx+1}" for idx in range(nCases))
         nit_list:tuple[float, ...] = tuple(nit for _ in range(nCases))
         counts_tumor_tag:tuple[str, ...] = tuple(counts.pop('Tumor').to_list())
-        counts_total:pd.Series = counts.sum(axis=1).astype(int)
+        counts_total: pd.Series = counts.loc[:, ~counts.columns.str.endswith("variant")].sum(axis=1)
     else:
         counts:pd.DataFrame = validate_template(template, default_tumors)
         prefix_list:tuple[str, ...] = tuple(counts.pop('ID').to_list())
         nit_list:tuple[float, ...] = tuple(counts.pop('NinT').to_list())
         counts_tumor_tag:tuple[str, ...] = tuple(counts.pop('Tumor').to_list())
-        counts_total:pd.Series = counts.sum(axis=1).astype(int)
+        counts_total: pd.Series = counts.loc[:, ~counts.columns.str.endswith("variant")].sum(axis=1)
 
     # Simulate sex
     sex:list[str] = simulate_sex(counts_tumor_tag)
