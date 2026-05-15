@@ -45,7 +45,7 @@
         "vcfGANerator",
         "-n", "10",
         "--tumor", "Breast-AdenoCa",
-        "--subtumor", "BRCA",
+        "--subtumor", "brca01",
         "--prefix", "subtumor_test",
         "-r", "/reference/hs37d5.fa",
         "--no-CNA-SV",

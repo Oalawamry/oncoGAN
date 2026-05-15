@@ -63,7 +63,7 @@ default_cna_tumors:dict[str, list[str]] = {
     "Uterus-AdenoCA": ["UCEC"]
 }
 default_subtumors:dict[str, list[str]] = {
-    "Breast-AdenoCa": ["BRCA"]
+    "Breast-AdenoCa": ["BRCA", "brca01", "brca02", "brca03", "brca04", "brca05", "brca06", "brca07", "brca08", "brca09"],
 }
 
 #################
@@ -248,7 +248,7 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None) -> pd.D
         return row
     
     # Prepare the list of donors to simulate
-    nCases_x:int = nCases_f * (20 if subtumor_f is not None else 5)
+    nCases_x:int = nCases_f # * (20 if subtumor_f is not None else 5)
     if tumor_f == "Lymph-CLL":
         mCases:int = round(nCases_x*0.42)
         uCases:int = nCases_x - mCases
@@ -266,12 +266,15 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None) -> pd.D
         tmp_counts = tmp_counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
 
         # Filter simulation by subtumor type when simulation is not guided
-        if subtumor_f is not None: #TODO - Update this section with a better approach in the future
-            sub_column:str = tmp_counts.columns[-2]
-            tmp_counts = tmp_counts[tmp_counts[sub_column] == 1].drop(columns=[sub_column])
+        # if subtumor_f is not None: #TODO - Update this section with a better approach in the future
+        #     sub_column:str = tmp_counts.columns[-2]
+        #     tmp_counts = tmp_counts[tmp_counts[sub_column] == 1].drop(columns=[sub_column])
         counts = pd.concat([counts, tmp_counts], ignore_index=True)
 
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
+    if subtumor_f is not None:
+        counts = counts.drop(columns=[counts.columns[-2]])
+    counts.to_csv(f"{tumor_f}_{subtumor_f if subtumor_f is not None else 'all'}_counts.csv", index=False)
     return counts
 
 def simulate_sex(tumor_list_f:tuple[str, ...]) -> list[str]:
