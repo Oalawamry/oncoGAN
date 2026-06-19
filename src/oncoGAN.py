@@ -256,13 +256,18 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None) -> pd.D
     else:
         cases_list:list[str] = [tumor_f]*nCases_x
     
+    load_dir:str = f"/oncoGAN/trained_models/donor_characteristics"
     counts:pd.DataFrame = pd.DataFrame()
     while counts.shape[0] < nCases_f:
         # Generate samples
-        tmp_counts:pd.DataFrame = calo_forest_generation('/oncoGAN/trained_models/donor_characteristics', cases_list, subtumor_f)
+        tmp_counts:pd.DataFrame = calo_forest_generation(load_dir, cases_list, subtumor_f)
 
         # Clean the output a bit (round, min and max boundaries)
-        tumor_stats:dict = pd.read_pickle('/oncoGAN/trained_models/donor_characteristics/donor_characteristics_stats.pkl')
+        if subtumor_f is not None:
+            model_dir:str = f"{load_dir}_{subtumor_f}"
+        else:
+            model_dir:str = load_dir
+        tumor_stats:dict = pd.read_pickle(os.path.join(model_dir, 'donor_characteristics_stats.pkl'))
         tmp_counts = tmp_counts.apply(clean_counts_apply, axis=1).dropna().reset_index(drop=True)
 
         # Filter simulation by subtumor type when simulation is not guided
