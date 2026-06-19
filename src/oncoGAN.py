@@ -277,9 +277,9 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None) -> pd.D
         counts = pd.concat([counts, tmp_counts], ignore_index=True)
 
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
+    counts.to_csv(f"{tumor_f}_{subtumor_f if subtumor_f is not None else 'all'}_counts.csv", index=False)
     if subtumor_f is not None:
         counts = counts.drop(columns=[counts.columns[-2]])
-    counts.to_csv(f"{tumor_f}_{subtumor_f if subtumor_f is not None else 'all'}_counts.csv", index=False)
     return counts
 
 def simulate_sex(tumor_list_f:tuple[str, ...]) -> list[str]:
