@@ -3,5 +3,7 @@
 **/.github
 test/hg19
 test/results
+test/brca_test
+.swp
 trained_models*
 fasta2bam/test_real_case/reference
