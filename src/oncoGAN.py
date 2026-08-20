@@ -218,7 +218,7 @@ def dae_reconstruction(z:pd.DataFrame, dae_model:Literal['genomic_profile']) -> 
 # Simulations #
 ###############
 
-def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None) -> pd.DataFrame:
+def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None, save_csv:int=0) -> pd.DataFrame:
 
     """
     Function to generate the number of each type of mutation per case
@@ -277,7 +277,16 @@ def simulate_counts(tumor_f:str, nCases_f:int, subtumor_f:str|None=None) -> pd.D
         counts = pd.concat([counts, tmp_counts], ignore_index=True)
 
     counts = counts.sample(n=nCases_f, replace=False).reset_index(drop=True)
-    counts.to_csv(f"{tumor_f}_{subtumor_f if subtumor_f is not None else 'all'}_counts.csv", index=False)
+
+    # Save the output as csv for testing purposes
+    if save_csv > 0:
+        i = save_csv # starts naming from number given
+        filename:str = f"{tumor_f}_{subtumor_f if subtumor_f is not None else 'all'}_rep-{i}_counts.csv"
+        while os.path.exists(filename):
+            i += 1
+            filename = f"{tumor_f}_{subtumor_f if subtumor_f is not None else 'all'}_rep-{i}_counts.csv"
+        counts.to_csv(filename, index=False)
+
     if subtumor_f is not None:
         counts = counts.drop(columns=[counts.columns[-2]])
     return counts
